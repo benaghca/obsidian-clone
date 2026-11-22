@@ -18,6 +18,10 @@ mod link_jobs;
 mod link_replies;
 mod link_table;
 mod name_maps;
+mod rescan;
+pub(crate) use rescan::RescanDiff;
+#[cfg(test)]
+pub(crate) use rescan::check_rescans;
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
@@ -328,14 +332,6 @@ impl Index {
         self.links.changes(since)
     }
 
-    /// Keep the page's link history across a rescan: this (fresh) index continues `older`'s
-    /// versions, logging only the notes whose links differ.
-    /// Its queued link work stays queued (the fresh index's own: what the replay touched).
-    pub(crate) fn continue_link_history(&mut self, older: &Index) {
-        self.links.continue_from(&older.links);
-        self.defer_links = older.defer_links;
-    }
-
     /// Leave large link updates queued for `link_reads` (the app; see `defer_links`).
     pub(crate) fn set_defer_links(&mut self, on: bool) {
         self.defer_links = on.then_some(INLINE_LINKS);
@@ -559,8 +555,9 @@ impl Index {
     }
 
     /// Paths `fresh` lacks, paths only `fresh` has, and files whose stamp differs, each in
-    /// path order: one walk of both sorted lists, no lookups (review 3: a rescan's finish holds
-    /// the lock for this).
+    /// path order: one walk of both sorted lists. Review 8: tests only, the whole comparison a
+    /// rescan's stepped one (`index::rescan`) must equal.
+    #[cfg(test)]
     pub(crate) fn file_diff(&self, fresh: &Index) -> (Vec<String>, Vec<String>, Vec<String>) {
         let (mut removed, mut created, mut modified) = (Vec::new(), Vec::new(), Vec::new());
         let mut old = self.files.iter().peekable();

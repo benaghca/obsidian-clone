@@ -841,12 +841,33 @@ impl LinkTable {
         }
     }
 
-    /// Continue `older`'s history (a rescan replaced the index): same id, and only notes whose
-    /// entries differ from `older` are logged.
-    pub(super) fn continue_from(&mut self, older: &LinkTable) {
-        self.history = older.history.clone();
-        let changed = diff(&older.notes, &self.notes);
+    /// Review 8: the version now, for a rescan's comparison made in steps.
+    pub(super) fn history_version(&self) -> u64 {
+        self.history.version
+    }
+
+    /// Every path logged after version `since`, or `None` when the log no longer reaches back
+    /// that far.
+    pub(super) fn logged_since(&self, since: u64) -> Option<Vec<Arc<str>>> {
+        if since < self.history.floor {
+            return None;
+        }
+        let log = &self.history.log;
+        let from = log.partition_point(|(v, _)| *v <= since);
+        Some(log.range(from..).map(|(_, path)| Arc::clone(path)).collect())
+    }
+
+    /// Continue `older`'s history (a rescan replaced the index): same id, and `changed`, the
+    /// notes whose entries differ from `older` (review 8: found in steps), logged. `older` is
+    /// being retired, so its history is moved here, not copied.
+    pub(super) fn continue_with(&mut self, older: &mut LinkTable, changed: Vec<Arc<str>>) {
+        self.history = std::mem::replace(&mut older.history, History::fresh());
         self.record(changed);
+    }
+
+    /// The notes whose entries differ between two tables (what `continue_with` logs).
+    pub(super) fn differing(&self, other: &LinkTable) -> Vec<Arc<str>> {
+        diff(&self.notes, &other.notes)
     }
 
     /// `(id, version, floor)`: `changes` answers versions from `floor` to `version`.

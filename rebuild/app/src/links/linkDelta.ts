@@ -144,8 +144,11 @@ const plainLayer = (map: PathMap | undefined): Layer => {
 
 let compactions = 0;
 let compacted: (() => void)[] = [];
-/** Per compaction task: the keys and comparisons it handled (tests: none exceeds a step). */
-let taskSizes: number[] = [];
+/**
+ * Per compaction task: the keys and comparisons it handled (tests: none exceeds a step). Review
+ * 8: kept only while a test asks (`recordCompactionTasks`), so a long session keeps none.
+ */
+let taskSizes: number[] | null = null;
 
 /** Work a compaction generator does between pauses (a key copied, a comparison, a check). */
 const PAUSE_EVERY = 64;
@@ -174,14 +177,14 @@ function compact(line: Line) {
     const before = ops;
     for (let i = 0; i < COMPACT_STEP / PAUSE_EVERY; i++) {
       if (!work.next().done) continue;
-      taskSizes.push(ops - before);
+      taskSizes?.push(ops - before);
       line.compacting = false;
       compactions -= 1;
       if (!compactions) for (const done of compacted.splice(0)) done();
       if (line.latest?.over && line.latest.over.size > threshold(line.latest.size)) compact(line);
       return;
     }
-    taskSizes.push(ops - before);
+    taskSizes?.push(ops - before);
     setTimeout(step, 0);
   };
   setTimeout(step, 0);
@@ -260,9 +263,14 @@ function* sortSteps<T>(values: T[], compare: (a: T, b: T) => number): Generator<
 
 const threshold = (size: number) => Math.max(MIN_OVER, size / OVER_SHARE);
 
-/** The work of each compaction task since the last call (tests). */
+/** Keep each compaction task's work for `compactionTasks` (tests), or (false) stop and drop it. */
+export function recordCompactionTasks(on: boolean) {
+  taskSizes = on ? [] : null;
+}
+
+/** The work of each compaction task since the last call, while recording (tests). */
 export function compactionTasks(): number[] {
-  return taskSizes.splice(0);
+  return taskSizes?.splice(0) ?? [];
 }
 
 /** Resolves once no compaction is running (tests). */
@@ -349,6 +357,33 @@ function laid(base: LinkIndex, changed: Record<string, LinkEntry>): LinkIndex {
 /** `base` with each changed note's entry put in. `base` is left as it was. */
 export function patchLinks(base: LinkIndex, changed: Record<string, LinkEntry>): LinkIndex {
   return laid(base, changed);
+}
+
+/**
+ * Each path and list of one map of a read, in the order of that map once built, without
+ * building it (review 8: a reader that only walks the map, like link suggestions, no longer
+ * folds a pile of changes on the spot). Only the paths new to the root are sorted; the root's
+ * own are walked in place. Read it to the end before the next patch or read of this map.
+ */
+export function* mapEntries(links: LinkIndex, field: Field): Generator<[string, string[]], void> {
+  const layer = layersOf.get(links)?.[field];
+  const root = layer ? layer.root : (links[field] ?? {});
+  const over = layer?.over ?? null;
+  if (!over) {
+    for (const path in root) yield [path, root[path]!];
+    return;
+  }
+  const added = [...over.keys()].filter((path) => over.get(path) !== null && own(root, path) === undefined).sort(byCodePoint);
+  let at = 0;
+  for (const path in root) {
+    while (at < added.length && byCodePoint(added[at]!, path) < 0) {
+      yield [added[at]!, over.get(added[at]!)!];
+      at += 1;
+    }
+    const value = over.has(path) ? over.get(path) : root[path];
+    if (value) yield [path, value];
+  }
+  for (; at < added.length; at++) yield [added[at]!, over.get(added[at]!)!];
 }
 
 /** One note's entry in a read, without building any map. */

@@ -116,6 +116,32 @@ pub(crate) fn flush_changes(
     events: &[Event],
     scan: impl FnOnce(&Path) -> Result<Index, String>,
 ) -> Vec<VaultChanged> {
+    flush_changes_with(inner, events, scan, |_| {})
+}
+
+/// Where a rescan's finish is, for a test to write between its steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FinishStage {
+    /// A catch-up round replayed app changes into the fresh index (no lock held).
+    Replayed,
+    /// One step of the comparison was made (no lock held).
+    Compared,
+}
+
+/// Catch-up rounds before the comparison: each replays, without the lock, what the app changed
+/// during the one before. They stop once a round has this many paths or fewer.
+const CATCH_UP_ROUNDS: usize = 4;
+const CATCH_UP_FEW: usize = 32;
+/// Files, or link entries, a comparison step reads under the read lock.
+const FINISH_STEP: usize = 2_048;
+
+/// `flush_changes`, calling `between` between a rescan finish's steps (tests).
+pub(crate) fn flush_changes_with(
+    inner: &std::sync::RwLock<Inner>,
+    events: &[Event],
+    scan: impl FnOnce(&Path) -> Result<Index, String>,
+    between: impl FnMut(FinishStage),
+) -> Vec<VaultChanged> {
     let (root, token) = {
         let mut inner = write_lock(inner);
         let Some(vault) = inner.vault.as_mut() else {
@@ -131,30 +157,121 @@ pub(crate) fn flush_changes(
     };
     // The expensive full-vault disk read must not hold AppState.inner.
     let fresh = scan(&root);
-    let mut inner = write_lock(inner);
     #[cfg(test)]
-    let held = std::time::Instant::now();
-    let Some(vault) = inner.vault.as_mut() else {
+    FINISH_HOLD.with(|h| h.set((Duration::ZERO, 0)));
+    match fresh {
+        Ok(fresh) => finish_rescan_in_steps(inner, &root, &token, fresh, between),
+        Err(err) => {
+            let mut guard = write_lock(inner);
+            let Some(vault) = guard.vault.as_mut() else {
+                return Vec::new();
+            };
+            vault.finish_rescan_retiring(&token, Err(err)).0
+        }
+    }
+}
+
+/// Review 8: swap a rescan's fresh index in with no vault-sized work under the write lock.
+/// Catch-up rounds replay the app's changes without the lock, the comparison runs in steps
+/// under the read lock, and the final hold replays and compares only what the app changed
+/// during the comparison (see `index::rescan`). A stale rescan stops at its next step. Every
+/// index dropped here is dropped after the lock is let go (review 5).
+fn finish_rescan_in_steps(inner: &std::sync::RwLock<Inner>, root: &Path, token: &std::sync::Arc<()>, mut fresh: Index, mut between: impl FnMut(FinishStage)) -> Vec<VaultChanged> {
+    {
+        let guard = held(crate::read(inner));
+        let Some(vault) = guard.0.vault.as_ref().filter(|vault| vault.rescan_is(token)) else {
+            return Vec::new();
+        };
+        vault.rescan_prepare(&mut fresh);
+    }
+    for _ in 0..CATCH_UP_ROUNDS {
+        crate::link_reads::writers_first();
+        let paths = {
+            let mut guard = held(write_lock(inner));
+            match guard.0.vault.as_mut().and_then(|vault| vault.rescan_catch_up(token)) {
+                Some(paths) => paths,
+                None => return Vec::new(),
+            }
+        };
+        if paths.is_empty() {
+            break;
+        }
+        fresh.replay(root, &paths);
+        between(FinishStage::Replayed);
+        if paths.len() <= CATCH_UP_FEW {
+            break;
+        }
+    }
+    let mut diff = {
+        let guard = held(crate::read(inner));
+        let Some(vault) = guard.0.vault.as_ref().filter(|vault| vault.rescan_is(token)) else {
+            return Vec::new();
+        };
+        vault.index.rescan_diff(&fresh)
+    };
+    loop {
+        // Back-to-back read holds would keep a waiting save out (a reader can take the lock
+        // again before the writer wakes): let writers in first, as link reads do.
+        crate::link_reads::writers_first();
+        let done = {
+            let guard = held(crate::read(inner));
+            let Some(vault) = guard.0.vault.as_ref().filter(|vault| vault.rescan_is(token)) else {
+                return Vec::new();
+            };
+            vault.index.rescan_diff_step(&fresh, &mut diff, FINISH_STEP)
+        };
+        between(FinishStage::Compared);
+        if done {
+            break;
+        }
+    }
+    let mut guard = held(write_lock(inner));
+    let Some(vault) = guard.0.vault.as_mut() else {
         return Vec::new();
     };
-    let (changes, retired) = vault.finish_rescan_retiring(&token, fresh);
-    // The old index is freed after the lock is let go (review 5).
-    drop(inner);
-    #[cfg(test)]
-    FINISH_HOLD.with(|h| h.set(held.elapsed()));
+    let (changes, retired) = vault.finish_rescan_stepped(token, fresh, diff);
+    drop(guard);
     drop(retired);
     changes
 }
 
-#[cfg(test)]
-thread_local! {
-    static FINISH_HOLD: std::cell::Cell<std::time::Duration> = const { std::cell::Cell::new(std::time::Duration::ZERO) };
+/// A lock guard that (in tests) records how long it was held, and how many files it walked
+/// (`last_finish_hold`).
+struct Held<G>(G, #[cfg(test)] Instant);
+
+fn held<G>(guard: G) -> Held<G> {
+    #[cfg(test)]
+    crate::index::take_file_visits();
+    Held(guard, #[cfg(test)] Instant::now())
 }
 
-/// Tests: how long the last rescan finish on this thread held the state lock.
+#[cfg(test)]
+impl<G> Drop for Held<G> {
+    fn drop(&mut self) {
+        let took = self.1.elapsed();
+        let walked = crate::index::take_file_visits();
+        FINISH_HOLD.with(|h| {
+            let (hold, most) = h.get();
+            h.set((hold.max(took), most.max(walked)));
+        });
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FINISH_HOLD: std::cell::Cell<(std::time::Duration, usize)> = const { std::cell::Cell::new((std::time::Duration::ZERO, 0)) };
+}
+
+/// Tests: the longest the last rescan finish on this thread held the state lock at once.
 #[cfg(test)]
 pub(crate) fn last_finish_hold() -> std::time::Duration {
-    FINISH_HOLD.with(std::cell::Cell::get)
+    FINISH_HOLD.with(std::cell::Cell::get).0
+}
+
+/// Tests: the most files one hold of the last rescan finish on this thread walked.
+#[cfg(test)]
+pub(crate) fn last_finish_walk() -> usize {
+    FINISH_HOLD.with(std::cell::Cell::get).1
 }
 
 /// What the events of one rename (one tracker) said: its two halves, or both ends at once.
@@ -391,6 +508,132 @@ mod tests {
         assert_eq!(vault.index.search("latest", 10).len(), 3);
         assert!(vault.index.frontmatter(None)["saved.md"].contains("status: new"));
         assert_eq!(vault.index.link_index().outgoing["saved.md"], vec!["created.md"]);
+    }
+
+    /// Review 8: the finish runs in steps without the write lock (catch-up rounds, then the
+    /// comparison under the read lock), and app writes land between every kind of step. None
+    /// is lost, the index ends equal to a fresh scan, only the changes made outside the app are
+    /// reported, and a page's link history continues across the swap. Inside the finish, every
+    /// rescan in the tests also checks the stepped comparison against a whole one made at the
+    /// swap (`index::rescan`).
+    #[test]
+    fn a_rescan_finished_in_steps_keeps_every_write_made_between_them() {
+        let dir = tmp_dir("rescan-steps");
+        let root = dir.path.clone();
+        for dir in ["l", "f"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        // Enough notes that the comparison takes several steps of `FINISH_STEP`.
+        for i in 0..5_000 {
+            fs::write(root.join(format!("l/{i:05}.md")), format!("see [[f/n{}]] and [[hub]] and [[h2]]\n", i % 40)).unwrap();
+        }
+        for j in 0..40 {
+            fs::write(root.join(format!("f/n{j}.md")), format!("[[f/n{}]]\n", (j + 1) % 40)).unwrap();
+        }
+        fs::write(root.join("hub.md"), "hub\n").unwrap();
+        let inner = state(&root);
+        write_lock(&inner).vault.as_mut().unwrap().index.set_defer_links(true);
+        let before = {
+            let mut guard = lock(&inner);
+            let index = &mut guard.vault.as_mut().unwrap().index;
+            index.settle_links_now();
+            index.link_changes(None)
+        };
+        // What the watcher missed (why it rescans): an edit, a delete and a new note.
+        fs::write(root.join("l/00007.md"), "only [[hub]] now\n").unwrap();
+        fs::remove_file(root.join("l/00008.md")).unwrap();
+        fs::create_dir_all(root.join("ext")).unwrap();
+        fs::write(root.join("ext/new.md"), "[[f/n1]]\n").unwrap();
+        fs::create_dir_all(root.join("ext2")).unwrap();
+        fs::write(root.join("ext2/out.md"), "outside\n").unwrap();
+
+        let (mut rounds, mut steps) = (0, 0);
+        let changes = flush_changes_with(
+            &inner,
+            &rescanning(),
+            |root| {
+                let fresh = Index::scan(root);
+                // More writes during the scan than one catch-up round's few.
+                let mut guard = write_lock(&inner);
+                let vault = guard.vault.as_mut().unwrap();
+                for i in 0..60 {
+                    vault.write_note(&format!("w/{i}.md"), "[[hub]] written during the scan\n").unwrap();
+                }
+                fresh
+            },
+            |at| {
+                let mut guard = write_lock(&inner);
+                let vault = guard.vault.as_mut().unwrap();
+                match at {
+                    FinishStage::Replayed => {
+                        rounds += 1;
+                        if rounds == 1 {
+                            // Between catch-up rounds: a folder move, and an app write over the
+                            // new note the watcher missed.
+                            vault.rename_path("f", "g").unwrap();
+                            vault.write_note("ext/new.md", "[[g/n2]] the app's\n").unwrap();
+                        }
+                    }
+                    FinishStage::Compared => {
+                        steps += 1;
+                        match steps {
+                            // Behind the comparison's cursor and ahead of it.
+                            1 => {
+                                vault.write_note("l/00005.md", "now [[g/n3]]\n").unwrap();
+                                vault.delete_path("l/04000.md", true).unwrap();
+                            }
+                            // A note in new folders, and an alias many notes read.
+                            // An app note in a folder made outside the app, which the comparison
+                            // has already found new: the folder is not new to the app any more.
+                            2 => {
+                                vault.write_note("ext2/app.md", "the app's\n").unwrap();
+                                vault.write_note("newdir/deep/a.md", "[[l/00005]]\n").unwrap();
+                                vault.write_note("hub.md", "---\naliases: [h2]\n---\nhub\n").unwrap();
+                            }
+                            // Once the files are compared, during the link entries.
+                            4 => vault.write_note("w/0.md", "[[g/n5]] rewritten\n").unwrap(),
+                            _ => {}
+                        }
+                    }
+                }
+            },
+        );
+        assert!(rounds >= 2, "catch-up rounds: {rounds}");
+        assert!(steps >= 5, "comparison steps: {steps}");
+        let mut want = one(ChangeKind::Remove, &["l/00008.md"]);
+        want.extend(one(ChangeKind::Create, &["ext2/out.md"]));
+        want.extend(one(ChangeKind::Modify, &["l/00007.md"]));
+        assert_eq!(changes, want, "only what changed outside the app is reported");
+
+        let mut guard = lock(&inner);
+        let index = &mut guard.vault.as_mut().unwrap().index;
+        index.settle_links_now();
+        let scan = Index::scan(&root).unwrap();
+        assert_eq!(index.list(), scan.list(), "the files equal a fresh scan's");
+        assert_eq!(index.link_index(), scan.link_index(), "the links equal a fresh scan's");
+        index.assert_maps_match_rebuild();
+        for (path, text) in [("l/00005.md", "now [[g/n3]]\n"), ("newdir/deep/a.md", "[[l/00005]]\n"), ("w/0.md", "[[g/n5]] rewritten\n"), ("w/59.md", "[[hub]] written during the scan\n"), ("ext/new.md", "[[g/n2]] the app's\n")] {
+            assert_eq!(fs::read_to_string(root.join(path)).unwrap(), text, "{path} on disk");
+            assert!(index.contains(path), "lost {path}");
+        }
+        for path in ["f/n0.md", "l/04000.md", "l/00008.md"] {
+            assert!(!index.contains(path), "resurrected {path}");
+        }
+        assert!(index.contains("g/n0.md"));
+        // The page holding the version from before patches to the scan's links.
+        let after = index.link_changes(Some((before.id, before.version)));
+        assert!(after.full.is_none(), "a delta across the swap");
+        let mut page = before.full.unwrap();
+        for (path, entry) in after.changed {
+            for (list, map) in [(entry.outgoing, &mut page.outgoing), (entry.markdown, &mut page.markdown), (entry.unresolved, &mut page.unresolved)] {
+                if list.is_empty() {
+                    map.remove(&path);
+                } else {
+                    map.insert(path.clone(), list);
+                }
+            }
+        }
+        assert_eq!(page, scan.link_index(), "the page patches to a fresh scan");
     }
 
     #[test]

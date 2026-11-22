@@ -5,7 +5,7 @@
 import { type Camera, toScreen } from "./camera";
 import type { GraphModel } from "./data";
 
-type DevWindow = { __graphWork?: number[]; __graphBuilds?: { at: number; ms: number; span: number; slice: number; install: number }[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown; __graphHold?: boolean; __graphBuildHold?: boolean; __graphBuildHeld?: number };
+type DevWindow = { __graphWork?: number[]; __graphBuilds?: { at: number; ms: number; span: number; slice: number; install: number }[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown; __graphHold?: boolean; __graphBuildHold?: boolean; __graphBuildHeld?: number; __graphBuildPass?: number; __graphBuildHeldBy?: number };
 const dev = window as unknown as DevWindow;
 
 /** Each frame's work (ms). */
@@ -57,13 +57,17 @@ export const devHold = import.meta.env.DEV ? () => !!dev.__graphHold : null;
 
 /**
  * Tests only (review 6): while `window.__graphBuildHold` is set, a rebuild of a graph already on
- * screen stops after its first step (`window.__graphBuildHeld` counts the rebuilds held), so a
- * test can deliver a link change while one is under way.
+ * screen stops after its first step (`window.__graphBuildHeld` counts the holds), so a test can
+ * deliver a link change while one is under way. Review 8: and after each later step; setting
+ * `window.__graphBuildPass` to n lets it go on n steps while still held, and
+ * `window.__graphBuildHeldBy` is the held build's number (a build started over gets a new one).
  */
 export const devBuildHold = import.meta.env.DEV
-  ? async (): Promise<void> => {
+  ? async (build: number): Promise<void> => {
       dev.__graphBuildHeld = (dev.__graphBuildHeld ?? 0) + 1;
-      while (dev.__graphBuildHold) await new Promise((resolve) => setTimeout(resolve, 10));
+      dev.__graphBuildHeldBy = build;
+      while (dev.__graphBuildHold && !((dev.__graphBuildPass ?? 0) > 0)) await new Promise((resolve) => setTimeout(resolve, 10));
+      if ((dev.__graphBuildPass ?? 0) > 0) dev.__graphBuildPass = (dev.__graphBuildPass ?? 0) - 1;
     }
   : null;
 export const devBuildHolding = import.meta.env.DEV ? () => !!dev.__graphBuildHold : null;

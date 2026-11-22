@@ -1384,3 +1384,167 @@ Each mutation was applied alone and its tests run. All 5 were caught.
   - This is the same load-dependent check as in rounds 5 and 6. The review found no link to the link work, and this round changes no Bases code, so I didn't chase it.
 - **Browser bench:** not rerun. The graph's frame path is unchanged; only the `building` marker changed.
 - The test runs rewrote 62 `rebuild/round*-shots` files; they were restored before committing.
+
+## Review round 8
+
+Codex review 8 of `d9e3215` (PASS-WITH-FIXES, `/tmp/r2-p2b-codex-review8.md`): one P2 and four P3 findings. The task for this round asks for every one, the Bases worker (#4) only if it needs no new package and makes no visible change.
+
+- The P2 (unrelated link changes starving a slow local graph rebuild) is fixed.
+- P3s #2 (link suggestions building the unresolved map), #3 (compaction samples kept in production) and #5 (rescan finish under the write lock) are fixed.
+- P3 #4 (mixed-type Bases sort in a worker) is not done, for the reasons below.
+
+No new crates or packages. Each fix has a regression test, and each test was checked against a mutation of its fix.
+
+### P2: unrelated link changes kept starting a slow local graph rebuild over
+
+**The problem.** Round 7 stopped irrelevant events from resetting the debounce while no rebuild ran. But once the replacement rebuild was under way (`building` set), `linksMatter` again counted every link change as relevant, and each one cancelled the build. A rebuild spanning several slices, with an unrelated change arriving during each, never went in. Round 7's test missed this: its replacement graph was small enough to finish between events.
+
+**The fix** (`graph/view.ts`):
+
+- **A build records the link changes made while it runs.** A rebuild of a local graph already on screen keeps them in `heldTouch`, as long as it reads no note text (tags, backend queries) and shows no timelapse. It also keeps the links it read (`read`: a build reads `ws.vault.links` once, in its first step). Such a change no longer cancels it.
+- **The check when it is done.** Before it goes in, the build checks every changed path against its own model with `localLinksMatter`:
+  - the path itself in the model;
+  - its links as the build read them;
+  - its links as they are now.
+  If any reaches the model, it is dropped and built again (`scheduleRebuild`). Otherwise it goes in.
+- **Kept as before, so these still cancel at once:**
+  - file changes;
+  - unknown deltas (`linkTouch` null);
+  - first builds;
+  - the global graph;
+  - builds reading note text;
+  - timelapse.
+- **A model waiting for the tick** (`waiting`) from such a build was checked when it was done. Link changes while it waits are judged against it, not the shown model. So an irrelevant change no longer drops it either (at 50k a tick spans several frames). A model from any other build waiting counts as in flight, as in round 5.
+
+**Tests:** `scripts/test-link-refresh-guards.mjs`.
+
+- **The dev hold now stops at every step.** The dev-only build hold (round 6) stops the build after each step while set, not just the first. `window.__graphBuildPass = n` lets it go on n steps, and `__graphBuildHeldBy` names the held build (a build started over gets a new number). None of this is in the release bundle.
+- **New part 7: changes between successive steps.**
+  - 3,000 extra notes give the rebuild several steps.
+  - The local graph of P4 rebuilds for P4 → Q4, and between each two of its steps X4.md (outside the graph) gets a new link.
+  - The rebuild was held at 9 steps. Every hold was the same build, it went in showing Q4 and Yon4, and exactly one build went in.
+- **Part 5 still covers the other case.** A change to a note the build newly reaches (Q2 gains `[[R2]]` while P2 → Q2 is being built) now restarts it at the check instead of cancelling it at once. The graph still ends with R2, and only one build goes in.
+
+### P3: opening link suggestions could build the unresolved map on the UI thread
+
+**The problem.** `linkCandidates` (`editorHost.ts`) read `ws.vault.links.unresolved`. When a save had laid changes on that map, reading it built the whole replacement map on the spot: listing the root, sorting the new paths, copying every key.
+
+**The fix** (`links/linkDelta.ts`):
+
+- **`mapEntries(links, field)`** walks one map of a read through its pending changes, without building it. It visits each path in the same order as the built map:
+  - the root's own keys are walked in place;
+  - only the paths new to the root are sorted;
+  - removed paths are skipped and changed ones read from the overlay.
+- `linkCandidates` uses it, so the candidates come out in the same order.
+
+**Tests** (`linkDelta.test.ts`):
+
+- **The order matches the built map's.** The random patch test (160 steps, with compactions landing in between) now also checks every read's three maps, walked this way, against the full reply's entries in order.
+- **A 50k-note measurement:** 50,000 notes with unresolved links, 6,000 changes laid over them (new paths sorted in among the old and past the last, plus removals and changes), then one save adding a link.
+  - The walk equals the built map's entries.
+  - It builds nothing: the overlay is still 6,000 after it.
+  - First request after that one-link save (node, vitest): **16.3 ms walked through, against 36.3 ms building the map and walking it**, as before.
+- **Mutations:** with the new paths left unsorted, the random test fails.
+
+### P3: compaction samples piled up in production
+
+`taskSizes`, the per-task work samples tests read through `compactionTasks()`, was a module-level array that every compaction task pushed to, with nothing draining it outside tests.
+
+- It is now `null` unless a test calls `recordCompactionTasks(true)`. The compaction test turns it on before its run and off after.
+- **New test, "keeps no compaction samples unless a test asks for them":** after a compaction with recording off, `compactionTasks()` returns nothing.
+- **Mutation:** with `recordCompactionTasks(false)` ignored, it fails.
+
+### P3: the rescan finish did vault-sized work under the write lock
+
+**The problem.** The watcher scans the vault without the state lock, then finished under one write hold, which:
+
+- replayed the paths the app changed meanwhile (reading the disk);
+- compared both indexes' file lists and link tables whole;
+- copied the link history;
+- pruned the format cache.
+
+In debug at 10k notes that was 3 ms, and about 10 ms of comparison alone at 50k in release.
+
+**The fix** (`watch.rs`, `vault.rs`, new `index/rescan.rs`):
+
+1. **Catch-up rounds, no lock held.** Each round drains the paths the app changed (`Vault::rescan_catch_up`, a brief write hold; the index goes on recording) and replays them into the fresh index without the lock (`Index::replay`). The fresh index is the watcher's own. Up to 4 rounds; they stop once a round has 32 paths or fewer.
+2. **The comparison in steps, under the read lock.** `RescanDiff` walks both indexes' files, then both link tables, in path order, 2,048 of each per step (`rescan_diff_step`, a merge walk from a cursor). It notes the link tables' history versions when it begins. Before each step it lets waiting writers in (`link_reads::writers_first`). Without that, back-to-back read holds kept a waiting save out, because the reader took the lock again before the writer woke: a save waited 8–11 ms across a run of 1 ms holds.
+3. **The final write hold** (`Vault::finish_rescan_stepped` → `Index::finish_rescan_diff`):
+   - replays what the app changed since the last round, which is only what it did during the comparison;
+   - compares again the files of those paths' trees and the folders above them (an app write can add a folder the comparison already found new on disk), and the notes whose entries either link table logged since the comparison began;
+   - moves the live index's link history into the fresh index instead of copying it, since the live index is being retired;
+   - swaps.
+
+**Why nothing can be lost or missed.** Every app change is recorded (`changed_during_rescan`) until the final hold takes the set, and an entry change is always logged in the link table's history. So any path a step compared before a change is compared again at the end. Every write before the final hold has completed, so the final replay reads it from disk, as the old finish did. A stale rescan (vault reopened) stops at its next step, and its index is dropped after the lock is let go. If a link log no longer reaches back to the comparison's start, the final hold compares every entry (rare, and correct).
+
+**Kept in the final hold:** the format-cache prune. It walks the format cache, which only holds notes the app has read whose format is CRLF or has a BOM, not the vault. Moving it would let a save between the swap and the prune lose a note's line endings.
+
+`Vault::finish_rescan_retiring` (one hold, used by tests and by a failed scan) now runs the same steps at once, so every older rescan test exercises the new reconciliation too.
+
+**Tests:**
+
+- **A test-only check on every rescan in the suite.** Inside every rescan finish, `finish_rescan_diff` also makes the whole comparison at the swap (`file_diff`, `LinkTable::differing`) and asserts the stepped result equals it. `index::check_rescans(false)` turns this off for the latency test and the bench, so their holds are the app's.
+- **`watch::tests::a_rescan_finished_in_steps_keeps_every_write_made_between_them`** (new): 5,000 notes. Before the rescan, the disk gets an edit, a delete and new notes the watcher missed. Then app writes land at every kind of step, through a new `flush_changes_with` hook:
+  - 60 notes during the scan (so two catch-up rounds);
+  - a folder move, and an app write over a note made outside the app, between rounds;
+  - edits and a delete behind and ahead of the comparison's cursor;
+  - a note in a folder made outside the app that the comparison has already found;
+  - notes in new folders, and an alias edit;
+  - an edit during the link-entry steps.
+- **What that test checks:**
+  - exactly the outside changes are reported (`Remove l/00008.md`, `Create ext2/out.md`, `Modify l/00007.md`);
+  - every app write is on disk and in the index, and nothing removed comes back;
+  - the files, links and maps equal a fresh scan;
+  - a page holding the version from before the rescan patches to the scan's link index.
+- **`a_save_behind_a_rescan_finish_with_a_high_fanout_edit_stays_quick`** (10k notes, debug) now asserts:
+  - no hold is over a quarter of the finish;
+  - no hold walks more than two steps of files (`watch::last_finish_walk`);
+  - a waiting save takes no longer than 4 holds plus 3 ms.
+
+| 10k notes, debug | Round 5–7 | Round 8 |
+|---|---|---|
+| Longest finish hold | 3.0 ms | **0.98–1.04 ms** |
+| Most files one hold walks | 20,004 | 4,096 |
+| Worst save | 2.4–2.9 ms | 0.96–1.0 ms |
+
+- **Mutations, each caught:**
+  - no folder-above recompute, or no tree recompute: the stepped-equals-whole check fails in the new test and `p2a_lookups_survive_a_rescan_swap_and_later_patches`;
+  - no link-log recompute: the same check, in the p2a test;
+  - catch-up rounds that replay nothing: lost writes (`rescan_keeps_app_mutations…`, and the new test's reported changes);
+  - no final replay: `a_rescan_swap_continues_the_link_history` and the p2a test;
+  - no `writers_first`: the latency test ("a save waited 8.3 ms; the longest hold was 1.0 ms");
+  - the whole comparison back in the final hold: the latency test ("held the lock 6.9 ms of 26.2 ms").
+- **Release** (`bench_link_deltas`, `/tmp/grove-bench-50000`, a new row): comparing 50,125 files and the link tables takes 10.0 ms at once. In steps it is 16.1 ms in all over 50 steps; the longest step is 0.40–1.05 ms and the final hold 0.006 ms, with nothing changed meanwhile.
+
+### P3 not done: the mixed-type Bases sort in a worker
+
+Not done, for two reasons:
+
+- **A worker needs a looser security policy.** The app's CSP sets `worker-src 'none'` (`tauri.conf.json`), so a worker would mean allowing workers to load. That is a change to the app's security policy, not something an invisible indexing piece should make on the side.
+- **Main-thread steps can't keep the order.** A sort column that mixes kinds has no consistent order (-2, "-3", -10 compare in a cycle; round 4). Its order is whatever the engine's own `Array.prototype.sort` makes of it. A sliced sort on the main thread can't reproduce that without copying the engine's algorithm, and the order is visible.
+
+It stays as round 4 left it. Only a mixed-kind sort column is sorted in one task. Consistent columns are sorted in steps, and the first paint is one pass.
+
+### Still open after review 8
+
+- The mixed-type Bases sort (above).
+- The rescan finish's format-cache prune stays in the final hold, bounded by the CRLF/BOM notes the app has read.
+- After a bulk change the write still rebuilds the name maps under the lock (about 46 ms at 50k in release), as review 7 asked.
+- At 50k notes a graph tick still costs about 95 ms of work, spread over frames of at most 12 ms.
+
+### Suites (review 8)
+
+- **`cargo test --offline`:** **240 passed**, 0 failed, 7 ignored. That is 239 at `d9e3215` plus the new rescan-steps test; the rescan latency test was extended.
+- **`cargo clippy --all-targets`:** nothing new. One complex type in `rescan.rs` became an alias (`Entry`). The hits in `file_map.rs` and in `watch.rs`'s older tests were already there.
+- **`npm run build`** (`tsc` and `vite build`): clean. The bundle has no trace of `__graphHold`, `__graphBuildHold`, `__graphBuildPass` or `__graphBuildHeldBy`.
+- **`vitest`:** **1716 / 1716**, including the two new link-delta tests.
+  - Two earlier runs at a load average of 6–10 each failed one unrelated timing check: a 5,000-element drawing parse (28 ms against 25 ms), then the command palette's per-keystroke check. Both pass on their own, and the third full run passed.
+- **`npm test`:** under heavy load from other work on the machine (load average 5–10), so the chain was finished in pieces.
+  - **Before `vitest`:** the browser-discovery and trace tests, `test-feel` and `test-tabs` passed in the chain, and so did `test-link-refresh-guards.mjs` with all 7 parts. `test-friction.mjs` failed its "enter_list_item: slowest input 24 ms (budget 16)" check in the chain and passed on its own.
+  - **After `vitest`:** the chain stopped on `test:geometry` ("reading context menu", one 20.2 ms frame against 20 ms). From there every remaining step and every `posttest` step was run on its own, with one retry for a failure.
+  - **Result:** 87 steps passed first time. `test-canvas-navigation.mjs` (300-card zoom frames) and `test-canvas-cards.mjs` ("six link cards load a frame") failed a frame-timing check once, then passed.
+  - **Two failed twice:**
+    - `test-bases-edge.mjs`: the same load-dependent 10k-row scroll check as in rounds 5–7 ("p95 16.7 max 33.4", one dropped frame).
+    - `test-bases-kanban-move.mjs`: "list new note", a column's + not opening its new note within 10 s. It fails the same way on `d9e3215`, run from a temporary worktree (since removed), so this round did not cause it. This round changes no Bases code. Round 7's chain passed it, so it looks environmental. I didn't chase it.
+- **Release bench** (`bench_link_deltas`, 50k): the new rescan row is above. The rest ran at higher load than in round 7: scan 1.09–1.23 s median, folder rename write 72–86 ms, longest settle hold 1.0 ms.
+- The test runs rewrote 62 `rebuild/round*-shots` files; they were restored before committing.

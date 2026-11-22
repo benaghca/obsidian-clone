@@ -467,7 +467,10 @@ fn a_save_behind_a_rescan_finish_with_a_high_fanout_edit_stays_quick() {
     let (_dir, inner) = open_deferred("link-rescan-latency", files);
     let before = crate::link_reads::link_changes(&inner, None).unwrap();
     let finish = std::sync::Mutex::new(Duration::ZERO);
+    let walked = std::sync::Mutex::new(0);
     let (flushed, saves, hold) = saves_during(&inner, || {
+        // Review 8: the holds the app's finish takes, without the tests' whole comparison.
+        crate::index::check_rescans(false);
         let scanned = std::sync::Mutex::new(None);
         flush_changes(&inner, &[Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan)], |root| {
             // An app save while the watcher scans without the lock, after the scan read the
@@ -478,18 +481,29 @@ fn a_save_behind_a_rescan_finish_with_a_high_fanout_edit_stays_quick() {
             fresh
         });
         *finish.lock().unwrap() = scanned.lock().unwrap().unwrap().elapsed();
+        crate::index::check_rescans(true);
+        *walked.lock().unwrap() = crate::watch::last_finish_walk();
         crate::watch::last_finish_hold()
     });
     let finish = *finish.lock().unwrap();
+    let walked = *walked.lock().unwrap();
     assert!(lock(&inner).vault.as_ref().unwrap().index.links_pending(), "the replay queued the readers");
     let started = Instant::now();
     let after = crate::link_reads::link_changes(&inner, Some((before.id, before.version))).unwrap();
     let settle = started.elapsed();
     let worst = *saves.iter().max().unwrap();
-    println!("rescan with a 10,000-reader alias edit (debug): flush {flushed:?}, finish {finish:?} (the lock held {hold:?}), settle {settle:?}, {} saves meanwhile, worst {worst:?}", saves.len());
+    println!("rescan with a 10,000-reader alias edit (debug): flush {flushed:?}, finish {finish:?} (the lock held {hold:?} at most, walking {walked} files at most), settle {settle:?}, {} saves meanwhile, worst {worst:?}", saves.len());
     assert!(hold <= finish, "the hold is part of the finish");
     // Review 5: the old index is freed after the lock is let go (it was most of the hold).
-    assert!(hold * 2 < finish, "the finish held the lock {hold:?} of {finish:?}");
+    // Review 8: the comparison runs in steps, so no hold is more than a small part of it.
+    assert!(hold * 4 < finish, "the finish held the lock {hold:?} of {finish:?}");
+    // Each comparison step walks `FINISH_STEP` files of each index at most; the final hold
+    // walks the trees of the paths the app changed (here none: the save came before the
+    // catch-up). The whole comparison walked all 10,002 paths of each, under one hold.
+    assert!(walked <= 2 * 2_048, "a finish hold walked {walked} files");
+    // A waiting save gets in after one of those holds, not after a run of them (the steps
+    // let writers in first).
+    assert!(worst <= hold * 4 + Duration::from_millis(3), "a save waited {worst:?}; the longest hold was {hold:?}");
     assert!(finish * 4 < settle, "the finish ({finish:?}) left the re-resolve ({settle:?}) to the read");
     assert!(worst * 4 < settle, "a save waited {worst:?}; the re-resolve took {settle:?}");
     assert!(after.full.is_none(), "the page holding the old version gets a delta");

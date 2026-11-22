@@ -159,6 +159,16 @@ impl Files {
         keys
     }
 
+    /// The node at `rel` (when indexed) and every node below it, in path order (review 8: a
+    /// rescan compares those again for a path the app changed meanwhile).
+    pub(super) fn tree_nodes(&self, rel: &str) -> Vec<(&String, &Node)> {
+        use std::ops::Bound::{Excluded, Included};
+        let mut out: Vec<(&String, &Node)> = self.map.get_key_value(rel).map(|(k, n)| (k, n.as_ref())).into_iter().collect();
+        let (start, end) = (format!("{rel}/"), format!("{rel}0"));
+        out.extend(self.map.range::<str, _>((Included(start.as_str()), Excluded(end.as_str()))).map(|(k, n)| (k, n.as_ref())));
+        out
+    }
+
     /// Whether any path lies below `rel`. Visits at most one path.
     pub(super) fn has_below(&self, rel: &str) -> bool {
         let found = self.below(rel).next().is_some();

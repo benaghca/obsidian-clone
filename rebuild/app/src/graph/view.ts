@@ -174,6 +174,15 @@ export function createGraphView(host: GraphHost) {
   let building = 0;
   /** A rebuild's new layout graph, waiting for the tick under way to end (`step`). */
   let waiting: Prepared | null = null;
+  /**
+   * Review 8: link changes made while the build under way runs, checked against its model
+   * before it goes in, so changes it cannot show don't start it over. Null when it can't be
+   * checked that way (a first build, the global graph, a build reading note text or showing a
+   * timelapse): a link change then cancels it, as before.
+   */
+  let heldTouch: Set<string> | null = null;
+  /** Whether `waiting` came from such a build (and was checked when it was done). */
+  let waitingChecked = false;
 
   /**
    * Rebuild the model from the vault and options. Runs synchronously when
@@ -204,16 +213,23 @@ export function createGraphView(host: GraphHost) {
       const { model: next, groups } = yield* built_;
       return yield* prepare(next, groups);
     })();
+    // The build reads the vault's links once, in its first step (`buildSteps`).
+    const read = ws.vault.links;
+    const checked = built && local && !reveal && !source.readsText(cfg);
     building = mine;
+    heldTouch = checked ? new Set() : null;
     let step = steps.next();
-    if (built && devBuildHold && devBuildHolding?.()) {
-      await devBuildHold();
-      if (mine !== seq || disposed) return;
-    }
     let slice = performance.now();
     let work = 0;
     let longest = 0;
-    while (!step.done) {
+    for (;;) {
+      // Tests (dev only): held after its first step, and (review 8) after each later one.
+      if (built && devBuildHold && devBuildHolding?.()) {
+        await devBuildHold(mine);
+        if (mine !== seq || disposed) return;
+        slice = performance.now();
+      }
+      if (step.done) break;
       if (built && !reveal && performance.now() - slice > SLICE_MS) {
         longest = Math.max(longest, performance.now() - slice);
         work += performance.now() - slice;
@@ -223,12 +239,24 @@ export function createGraphView(host: GraphHost) {
       }
       step = steps.next();
     }
-    if (building === mine) building = 0;
+    if (building === mine) {
+      building = 0;
+      const touched = heldTouch;
+      heldTouch = null;
+      // A link change made meanwhile that reaches this model's notes (by their old links or
+      // their new ones): build again from the links as they now are.
+      if (touched?.size && localLinksMatter(touched, step.value.next.index, false, cfg.hideUnresolved, (path) => linkEntryOf(ws.vault.links, path), (path) => linkEntryOf(read, path))) {
+        source.forget();
+        scheduleRebuild();
+        return;
+      }
+    }
     const installing = performance.now();
     // A new layout graph goes in between ticks: the next frame puts it in once the tick under
     // way ends (review 4). Anything else goes in now.
     if (step.value.graph && (sim.ticking || devHold?.())) {
       waiting = step.value;
+      waitingChecked = checked;
       invalidate();
     } else install(step.value);
     devBuilt?.(work + performance.now() - slice, performance.now() - started, Math.max(longest, performance.now() - slice), performance.now() - installing);
@@ -343,6 +371,7 @@ export function createGraphView(host: GraphHost) {
     if (built) {
       seq++;
       building = 0;
+      heldTouch = null;
     }
     clearTimeout(refreshTimer);
     if (active) refreshTimer = window.setTimeout(() => void rebuild(), delay);
@@ -662,11 +691,13 @@ export function createGraphView(host: GraphHost) {
     // A rebuild in flight read older links than these: judge nothing against the old model.
     // Nor while a rebuilt model waits to go in (review 5): it was built from links before these,
     // and the shown model says nothing about the notes it adds.
-    if (building !== 0 || waiting) return true;
+    // Review 8: a model that was checked when its build was done is judged instead of the shown
+    // one, since it is what goes in.
+    if (building !== 0 || (waiting && !waitingChecked)) return true;
     const { links, linkPrev } = ws.vault;
     return localLinksMatter(
       touched,
-      local ? model.index : null,
+      local ? (waiting?.next ?? model).index : null,
       source.readsText(cfg),
       cfg.hideUnresolved,
       (path) => linkEntryOf(links, path),
@@ -677,7 +708,15 @@ export function createGraphView(host: GraphHost) {
   // The vault changed (a moment after a save, never on a keystroke): update in place.
   const onChange = (change: string) => {
     if (disposed) return;
-    if (change === "links" && !linksMatter(ws.vault.linkTouch)) return;
+    if (change === "links") {
+      const touched = ws.vault.linkTouch;
+      if (building !== 0 && heldTouch && touched) {
+        // Review 8: checked against the build under way's model when it is done (`rebuild`).
+        for (const path of touched) heldTouch.add(path);
+        return;
+      }
+      if (!linksMatter(touched)) return;
+    }
     if (change === "links" || change === "files") {
       source.forget();
       scheduleRebuild();

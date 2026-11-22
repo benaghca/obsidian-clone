@@ -725,6 +725,41 @@ fn bench_link_deltas() {
             elapsed_ms(started)
         );
     }
+
+    // Review 8: a rescan's comparison with the live index. Before, the whole of it (and a copy
+    // of the link history) ran in the finish's write hold; now it runs in steps of 2,048 under
+    // the read lock, and the final hold compares only what changed meanwhile (here, nothing).
+    super::rescan::check_rescans(false);
+    // As in the app: the live index has a long link history, the scan's is new.
+    let mut fresh = Index::scan(root).expect("scan");
+    let live = &mut idx;
+    let started = Instant::now();
+    let whole = live.file_diff(&fresh);
+    let differing = live.links.differing(&fresh.links);
+    let whole_ms = elapsed_ms(started);
+    let started = Instant::now();
+    let mut diff = live.rescan_diff(&fresh);
+    let (mut steps, mut longest) = (0, 0.0f64);
+    loop {
+        let step = Instant::now();
+        let done = live.rescan_diff_step(&fresh, &mut diff, 2_048);
+        longest = longest.max(elapsed_ms(step));
+        steps += 1;
+        if done {
+            break;
+        }
+    }
+    let stepped_ms = elapsed_ms(started);
+    let started = Instant::now();
+    let found = live.finish_rescan_diff(&mut fresh, diff, &std::collections::BTreeSet::new());
+    let final_ms = elapsed_ms(started);
+    assert_eq!(found, whole);
+    println!(
+        "GROVE_BENCH rescan comparison, {} files: whole_ms={whole_ms:.1} ({} link entries differ); stepped total_ms={stepped_ms:.1} in {steps} steps, longest_step_ms={longest:.2}, final_hold_ms={final_ms:.3}",
+        fresh.files.len(),
+        differing.len()
+    );
+    super::rescan::check_rescans(true);
 }
 
 /// Settle as `link_reads::settle` does; the longest step that holds the lock (ms).

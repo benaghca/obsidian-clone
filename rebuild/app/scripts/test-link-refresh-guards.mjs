@@ -15,6 +15,7 @@
 // 4. Review 5: a link change while a rebuilt local graph waits to go in (see below).
 // 5. Review 6: a link change while a local graph rebuild is still being built (see below).
 // 6. Review 7: irrelevant link changes after that cancelled build (see below).
+// 7. Review 8: irrelevant link changes between the steps of a rebuild under way (see below).
 import assert from 'node:assert/strict';
 import { withBrowser, sleep } from './browser.mjs';
 
@@ -255,4 +256,59 @@ await withBrowser(async ({ run, send, click, chord }) => {
   assert.ok(stream.events >= 10, `X3 changed ${stream.events} times`);
   assert.equal(stream.nodes, 7, 'the rebuild went in while X3 kept changing');
   console.log(`PASS local graph: ${stream.events} irrelevant link changes after a cancelled build do not put the rebuild off`);
+
+  // 7. Review 8: link changes to a note the graph cannot show (X4), one between each two steps
+  // of a rebuild still being built (held after each step, dev only; 3,000 more notes give it
+  // several), do not start it over: the same build goes on and goes in. (Part 5 keeps the
+  // other case: a change to a note the build newly reaches does start it over.)
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    for (let i = 0; i < 3000; i++) await api.createNote(`F4/n${i}.md`, 'f\n');
+    await api.createNote('P4.md', 'p [[Zed4]] [[T4]]\n');
+    await api.createNote('Q4.md', 'q [[Yon4]]\n');
+    await api.createNote('T4.md', 't\n');
+    await api.createNote('X4.md', 'x [[Far4]]\n');
+    await ws.vault.refreshFiles();
+    await ws.vault.refreshLinks();
+    await ws.open('P4.md');
+    ws.openView('localgraph', 'right', 'P4.md');
+  });
+  await until(run, 'the local graph shows P4, Zed4 and T4', () => window.__graphProbe?.().nodes === 3, undefined, 20000);
+  await sleep(800);
+  const at4 = await run(async () => {
+    window.__graphBuildHold = true;
+    window.__graphBuildPass = 0;
+    const before = { builds: window.__graphBuilds.length, held: window.__graphBuildHeld ?? 0 };
+    const { api } = await import('/src/api.ts');
+    await api.writeNote('P4.md', 'p [[Zed4]] [[T4]] [[Q4]]\n');
+    await ws.vault.refreshLinks();
+    return before;
+  });
+  await until(run, 'the rebuild for P4 → Q4 is under way, held', n => (window.__graphBuildHeld ?? 0) > n, at4.held);
+  const stepped = await run(async () => {
+    const { api } = await import('/src/api.ts');
+    const by = window.__graphBuildHeldBy;
+    let holds = 1;
+    let same = true;
+    for (let k = 0; k < 40; k++) {
+      const held = window.__graphBuildHeld;
+      await api.writeNote('X4.md', `x [[Far4]] [[Far4-${k}]]\n`);
+      await ws.vault.refreshLinks();
+      window.__graphBuildPass = 1;
+      for (let t = 0; t < 100 && window.__graphBuildHeld === held; t++) await new Promise(r => setTimeout(r, 10));
+      if (window.__graphBuildHeld === held) break;
+      holds++;
+      same &&= window.__graphBuildHeldBy === by;
+    }
+    window.__graphBuildHold = false;
+    window.__graphBuildPass = 0;
+    return { holds, same };
+  });
+  assert.ok(stepped.holds >= 3, `the rebuild was held at ${stepped.holds} steps`);
+  assert.ok(stepped.same, 'every step held was the same build (none started over)');
+  await until(run, 'the graph shows Q4 and Yon4', n => window.__graphProbe?.().nodes === n, 5, 5000);
+  await sleep(800);
+  const after4 = await run(() => window.__graphBuilds.length);
+  assert.equal(after4 - at4.builds, 1, 'that one rebuild went in');
+  console.log(`PASS local graph: a rebuild with irrelevant link changes between ${stepped.holds} of its steps goes in`);
 });

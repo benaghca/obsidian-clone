@@ -24,7 +24,7 @@ const NO_VAULT: &str = "no vault open";
 static SETTLER: Mutex<()> = Mutex::new(());
 
 /// Wait (briefly, up to 50 ms) while any writer is queued for the lock.
-fn writers_first() {
+pub(crate) fn writers_first() {
     for _ in 0..500 {
         if WRITERS_WAITING.load(Ordering::SeqCst) == 0 {
             return;

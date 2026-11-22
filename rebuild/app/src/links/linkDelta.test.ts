@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LinkIndex } from "../api";
-import { byCodePoint, compactionTasks, type LinkChanges, type LinkEntry, linkChanges, linkCompactions, linkEntryOf, linkReader, overlaySize, patchLinks } from "./linkDelta";
+import { byCodePoint, compactionTasks, type LinkChanges, type LinkEntry, linkChanges, linkCompactions, linkEntryOf, linkReader, mapEntries, overlaySize, patchLinks, recordCompactionTasks } from "./linkDelta";
 
 type Field = "outgoing" | "markdown" | "unresolved";
 const FIELDS: Field[] = ["outgoing", "markdown", "unresolved"];
@@ -168,6 +168,9 @@ describe("patchLinks", () => {
         for (const field of FIELDS) if (state.get(path)?.[field].length) want[field] = state.get(path)![field];
         expect(linkEntryOf(read, path), `read ${i} ${path}`).toEqual(want);
       }
+      // Review 8: walking a map through its changes gives the built map's entries, in order.
+      const parsed = JSON.parse(full) as LinkIndex;
+      for (const field of FIELDS) expect([...mapEntries(read, field)], `read ${i} ${field} walked`).toEqual(Object.entries(parsed[field] ?? {}));
       expect(JSON.stringify(read), `read ${i}`).toBe(full);
     }
   });
@@ -193,7 +196,7 @@ describe("patchLinks", () => {
       longest = Math.max(longest, performance.now() - started);
     }, ms)) as typeof setTimeout;
     try {
-      compactionTasks();
+      recordCompactionTasks(true);
       const links = patchLinks({ outgoing, markdown: {}, unresolved: {} }, changed);
       expect(overlaySize(links, "outgoing")).toBe(24_000);
       await linkCompactions();
@@ -207,8 +210,52 @@ describe("patchLinks", () => {
       expect(links.outgoing["z/005999.md"]).toEqual(["late5999.md"]);
       expect(links.outgoing["n/000008.md"]).toEqual(["moved1.md"]);
     } finally {
+      recordCompactionTasks(false);
       globalThis.setTimeout = real;
     }
+  });
+
+  it("keeps no compaction samples unless a test asks for them", async () => {
+    // Review 8: a long session compacts many times; it records nothing.
+    const outgoing: Record<string, string[]> = {};
+    for (let i = 0; i < 2_000; i++) outgoing[`n/${i}.md`] = [`t${i}.md`];
+    const changed: Record<string, LinkEntry> = {};
+    for (let i = 0; i < 1_000; i++) changed[`n/${i}.md`] = { outgoing: [`moved${i}.md`] };
+    const links = patchLinks({ outgoing, markdown: {}, unresolved: {} }, changed);
+    expect(overlaySize(links, "outgoing")).toBe(1_000);
+    await linkCompactions();
+    expect(overlaySize(links, "outgoing")).toBe(0);
+    expect(compactionTasks()).toEqual([]);
+  });
+
+  it("walks a map with changes laid over it in the built map's order without building it", () => {
+    // Review 8: link suggestions walk the unresolved map. 50,000 notes with unresolved links,
+    // 6,000 changes laid over them (under the share that starts a compaction): new paths sorted
+    // in among the old, past the last, removed and changed ones. Then one save adds a link.
+    const pad = (i: number) => String(i).padStart(6, "0");
+    const unresolved: Record<string, string[]> = {};
+    for (let i = 0; i < 50_000; i++) unresolved[`n/${pad(i * 2)}.md`] = [`missing${i}`];
+    const changed: Record<string, LinkEntry> = {};
+    for (let i = 0; i < 2_000; i++) changed[`n/${pad(i * 2 + 1)}.md`] = { unresolved: [`new${i}`] };
+    for (let i = 0; i < 1_000; i++) changed[`z/${pad(i)}.md`] = { unresolved: [`late${i}`] };
+    for (let i = 0; i < 2_000; i++) changed[`n/${pad(i * 10)}.md`] = { unresolved: [`moved${i}`] };
+    for (let i = 0; i < 1_000; i++) changed[`n/${pad(i * 10 + 4)}.md`] = {};
+    const base = patchLinks({ outgoing: {}, markdown: {}, unresolved }, changed);
+    const read = patchLinks(base, { "n/000003.md": { unresolved: ["new1", "typed"] } });
+    expect(overlaySize(read, "unresolved")).toBe(6_000);
+    let started = performance.now();
+    const walked = [...mapEntries(read, "unresolved")];
+    const walk = performance.now() - started;
+    expect(overlaySize(read, "unresolved"), "the walk built nothing").toBe(6_000);
+    // The same read again, built the way a reader of `links.unresolved` builds it.
+    const again = patchLinks(base, { "n/000003.md": { unresolved: ["new1", "typed"] } });
+    started = performance.now();
+    const built = Object.entries(again.unresolved ?? {});
+    const fold = performance.now() - started;
+    console.log(`first suggestion walk after a one-link save, 50,000 + 6,000 over: ${walk.toFixed(1)} ms walked through, ${fold.toFixed(1)} ms building the map`);
+    expect(walked).toEqual(built);
+    expect(walked.length).toBe(50_000 + 2_000 + 1_000 - 1_000);
+    expect(walked.find(([path]) => path === "n/000003.md")?.[1]).toEqual(["new1", "typed"]);
   });
 
   it("costs the changed notes, not the map, until a map is read", () => {
