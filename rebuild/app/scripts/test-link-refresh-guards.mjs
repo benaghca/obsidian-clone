@@ -14,6 +14,7 @@
 //    the rows the browser's own sort picks.
 // 4. Review 5: a link change while a rebuilt local graph waits to go in (see below).
 // 5. Review 6: a link change while a local graph rebuild is still being built (see below).
+// 6. Review 7: irrelevant link changes after that cancelled build (see below).
 import assert from 'node:assert/strict';
 import { withBrowser, sleep } from './browser.mjs';
 
@@ -203,4 +204,55 @@ await withBrowser(async ({ run, send, click, chord }) => {
   const fresh2 = await run(() => { const p = window.__graphProbe(); return [p.nodes, p.links]; });
   assert.deepEqual(after.slice(0, 2), fresh2, 'the shown neighbourhood is a fresh build\'s');
   console.log('PASS local graph: a build under way when a link change lands does not go in');
+
+  // 6. Review 7: once that change cancels the build under way, the graph waits for the rebuild it
+  // asked for, not for the cancelled one. Link changes to a note it cannot show (X3, edited every
+  // 60 ms, well inside the 200 ms refresh delay) must not keep putting that rebuild off.
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('P3.md', 'p [[Zed3]] [[T3]]\n');
+    await api.createNote('Q3.md', 'q [[Yon3]] [[U3]]\n');
+    await api.createNote('R3.md', 'r\n');
+    await api.createNote('T3.md', 't\n');
+    await api.createNote('U3.md', 'u\n');
+    await api.createNote('X3.md', 'x [[Far3]]\n');
+    await ws.vault.refreshFiles();
+    await ws.vault.refreshLinks();
+    await ws.open('P3.md');
+    ws.openView('localgraph', 'right', 'P3.md');
+  });
+  await until(run, 'the local graph shows P3, Zed3 and T3', () => window.__graphProbe?.().nodes === 3);
+  await sleep(800);
+  const at3 = await run(async () => {
+    window.__graphBuildHold = true;
+    const held = window.__graphBuildHeld ?? 0;
+    const { api } = await import('/src/api.ts');
+    await api.writeNote('P3.md', 'p [[Zed3]] [[T3]] [[Q3]]\n');
+    await ws.vault.refreshLinks();
+    return held;
+  });
+  await until(run, 'the rebuild for P3 → Q3 is under way, held', n => (window.__graphBuildHeld ?? 0) > n, at3);
+  const stream = await run(async () => {
+    const { api } = await import('/src/api.ts');
+    // Q3's change cancels the held build; the hold ends with it, before the refresh delay runs.
+    const off = ws.on(change => {
+      if (change === 'links' && ws.vault.linkTouch?.has('Q3.md')) window.__graphBuildHold = false;
+    });
+    await api.writeNote('Q3.md', 'q [[Yon3]] [[U3]] [[R3]]\n');
+    await ws.vault.refreshLinks();
+    off();
+    const end = performance.now() + 1500;
+    let events = 0;
+    while (performance.now() < end) {
+      await api.writeNote('X3.md', `x [[Far3]] [[Far3-${events}]]\n`);
+      await ws.vault.refreshLinks();
+      events++;
+      await new Promise(r => setTimeout(r, 60));
+    }
+    return { events, nodes: window.__graphProbe().nodes, held: window.__graphBuildHold };
+  });
+  assert.equal(stream.held, false, 'the hold ended with the cancelling change');
+  assert.ok(stream.events >= 10, `X3 changed ${stream.events} times`);
+  assert.equal(stream.nodes, 7, 'the rebuild went in while X3 kept changing');
+  console.log(`PASS local graph: ${stream.events} irrelevant link changes after a cancelled build do not put the rebuild off`);
 });

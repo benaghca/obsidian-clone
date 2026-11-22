@@ -1193,16 +1193,23 @@ fn a_bulk_change_queues_every_note_for_jobs_and_settles_to_a_full_walk() {
     assert!(idx.links.is_staging("long.md"), "the publish is staged");
 
     take_rebuild_maps_calls();
+    let queued = idx.links.pending().count();
+    link_table::take_swept();
     idx.relocate("f", "g");
     assert_eq!(take_rebuild_maps_calls(), 1, "a folder move rebuilds the maps");
     assert!(idx.links_pending(), "every note is queued");
+    // Review 7: the write only marks the walk; no entry or file is looked at under it.
+    assert_eq!(link_table::take_swept(), (0, 0), "the bulk write swept nothing");
+    assert_eq!(idx.links.pending().count(), queued, "the bulk write queued no note itself");
     assert!(idx.links.shared("l/0.md").unwrap().has_target("f/n0.md"), "no note was resolved again under the lock");
     assert_eq!(idx.publish(&mut job), LinkSlice::Stale, "the rebuild drops the job");
     assert!(!idx.links.is_staging("long.md"), "what it had added is to be cleared");
 
-    let (mut jobs, mut saves) = (0, 0);
+    let (mut jobs, mut saves, mut peak) = (0, 0, 0);
     while let Some(job) = idx.link_job() {
         jobs += 1;
+        peak = peak.max(idx.links.pending().count());
+        assert!(link_table::take_swept().1 <= 2, "a step swept more than its budget");
         run_job_with(job, &mut idx, &mut |idx| {
             saves += 1;
             if saves % 7 == 0 {
@@ -1213,14 +1220,19 @@ fn a_bulk_change_queues_every_note_for_jobs_and_settles_to_a_full_walk() {
                 save(idx, root, "n3.md", "root\n");
             }
         });
-        if jobs == 40 {
-            // A second bulk change while the first is settling.
+        if jobs == 200 {
+            // A second bulk change while the first is settling, once its walk has passed
+            // notes in l/ that read g/ (review 7: the walk starts over, or they keep g/).
+            assert!(!idx.links.shared("l/0.md").unwrap().has_target("f/n0.md"), "the walk passed l/0");
+            assert!(idx.links.shared("l/0.md").unwrap().has_target("g/n0.md"));
             take_rebuild_maps_calls();
             idx.remove_tree("g");
             assert_eq!(take_rebuild_maps_calls(), 1, "a folder delete past `BULK_PATHS` rebuilds the maps");
         }
     }
-    assert!(jobs > 40, "the settle took many jobs ({jobs})");
+    assert!(jobs > 200, "the settle took many jobs ({jobs})");
+    // A job takes 2 here; the walk adds while fewer than 2 are queued (a woken key adds 2).
+    assert!(peak <= 8, "the queue grew to {peak} notes");
     assert!(!idx.links_pending());
     idx.assert_maps_match_rebuild();
     assert!(!idx.links.has_cleanup());
@@ -1273,4 +1285,28 @@ fn saves_and_jobs_behind_many_woken_keys_look_at_a_bounded_number_of_them() {
     assert!(most <= 4_096, "a job's expansion (`EXPAND_STEP`) looked at {most} keys");
     assert!(!idx.links_pending());
     idx.assert_maps_match_rebuild();
+}
+
+/// Review 7: a queue drained from vault size down to a few notes costs a few notes to take
+/// from. 200,000 notes are queued (as a round-6 bulk change did) and taken off but one; then
+/// 2,000 single saves each queue a note and take the first two. A hash set kept its capacity,
+/// and each take scanned the buckets the drain left empty (about 0.46 s here in debug); the
+/// ordered set finds them at once.
+#[test]
+fn a_queue_drained_after_a_large_bulk_update_is_quick_to_take_from() {
+    let mut table = LinkTable::default();
+    let paths: Vec<String> = (0..200_000).map(|j| format!("l/{j:06}.md")).collect();
+    for path in &paths {
+        table.touch(path);
+    }
+    assert_eq!(table.take_some(paths.len() - 1).len(), paths.len() - 1);
+    let started = Instant::now();
+    for i in 0..2_000 {
+        table.touch(&format!("s/{i}.md"));
+        assert!(table.pending().next().is_some());
+        assert!(!table.take_some(2).is_empty());
+    }
+    let took = started.elapsed();
+    println!("2,000 takes from a drained queue (debug): {took:?}");
+    assert!(took < std::time::Duration::from_millis(40), "2,000 takes from a drained queue took {took:?}");
 }

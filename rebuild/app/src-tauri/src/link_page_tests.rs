@@ -264,17 +264,47 @@ fn queued_saves_stay_quick(what: &str, inner: &RwLock<Inner>, write: impl FnOnce
 
 /// `queued_saves_stay_quick` with the saves made by `save`; the longest hold.
 fn queued_saves_of(what: &str, inner: &RwLock<Inner>, write: impl FnOnce(&mut crate::vault::Vault), save: impl Fn(&mut crate::vault::Vault, usize) + Send + Sync) -> std::time::Duration {
-    use std::time::Instant;
-    let started = Instant::now();
-    write(crate::write_lock(inner).vault.as_mut().unwrap());
-    let edit = started.elapsed();
+    use std::time::{Duration, Instant};
+    // Review 7: one save is queued on the lock before the write lets go of it. It waits for
+    // the write's whole hold (for a bulk change, the name maps it rebuilds), then for its own.
+    let (edit, queued_wait, queued_after) = std::thread::scope(|s| {
+        let mut guard = crate::write_lock(inner);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let save = &save;
+        let queued = s.spawn(move || {
+            tx.send(()).unwrap();
+            let asked = Instant::now();
+            let mut guard = crate::write_lock(inner);
+            let got = Instant::now();
+            save(guard.vault.as_mut().unwrap(), 0);
+            (asked, got)
+        });
+        rx.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        Index::take_swept();
+        let started = Instant::now();
+        write(guard.vault.as_mut().unwrap());
+        let edit = started.elapsed();
+        assert_eq!(Index::take_swept(), (0, 0), "{what}: the write walked no note's links");
+        drop(guard);
+        let released = Instant::now();
+        let (asked, got) = queued.join().unwrap();
+        let done = Instant::now();
+        (edit, got - asked, done - released)
+    });
     assert!(lock(inner).vault.as_ref().unwrap().index.links_pending(), "{what}: the work is queued");
-    let (settle, saves, (reply, hold)) = saves_of(inner, save, || {
+    let (settle, mut saves, (reply, hold)) = saves_of(inner, save, || {
         crate::link_reads::take_longest_hold();
         (crate::link_reads::link_changes(inner, None).unwrap(), crate::link_reads::take_longest_hold())
     });
+    // Its wait is the write's hold and its 5 ms head start; what follows is its own save.
+    assert!(queued_wait < edit + Duration::from_millis(5) + settle / 4, "{what}: a save queued during the write waited {queued_wait:?}");
+    saves.push(queued_after);
     let worst = *saves.iter().max().unwrap();
-    println!("{what} (debug): the write {edit:?}, read incl. settling {settle:?} (longest hold {hold:?}), {} saves meanwhile, worst {worst:?}", saves.len());
+    println!(
+        "{what} (debug): the write {edit:?} (a save queued during it waited {queued_wait:?}, then took {queued_after:?}), read incl. settling {settle:?} (longest hold {hold:?}), {} saves meanwhile, worst {worst:?}",
+        saves.len()
+    );
     assert!(hold * 4 < settle, "{what}: one step held the lock {hold:?} of {settle:?}");
     assert!(edit * 4 < settle, "{what}: the write ({edit:?}) left the work ({settle:?}) to the read");
     assert!(saves.len() >= 3, "{what}: saves ran while the read settled");

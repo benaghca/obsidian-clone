@@ -38,7 +38,7 @@ use super::name_maps::{key_hash, Kind, KeyHash};
 use crate::model::LinkEntry;
 #[cfg(test)]
 use crate::model::{LinkChanges, LinkIndex};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -117,6 +117,24 @@ type Woken = BTreeMap<KeyHash, Option<Arc<str>>>;
 #[cfg(test)]
 thread_local! {
     static KEYS_SEEN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SWEPT: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Tests: entries and files a bulk sweep looked at on this thread, in all and in the largest
+/// step (resets).
+#[cfg(test)]
+pub(crate) fn take_swept() -> (usize, usize) {
+    SWEPT.with(|n| n.replace((0, 0)))
+}
+
+/// Review 7: a bulk change's walk over every note, a step at a time. First the table's old
+/// entries (in path order, from `entries_after`), then the files (from `files_after`): a note
+/// with links and no entry yet came in with the bulk change, whose nodes queue nothing.
+#[derive(Debug, Default)]
+struct Sweep {
+    entries_after: Option<Arc<str>>,
+    entries_done: bool,
+    files_after: Option<String>,
 }
 
 /// Tests: woken keys looked at by `queued_over` and `expand` on this thread (resets).
@@ -470,8 +488,11 @@ pub(super) struct LinkTable {
     notes: BTreeMap<Arc<str>, Arc<Resolved>>,
     by_target: ByTarget,
     readers: Readers,
-    /// Notes to resolve again when the current change is done.
-    pending: HashSet<Arc<str>>,
+    /// Notes to resolve again when the current change is done. Ordered (review 7): taking the
+    /// first few from a hash set scans every bucket a large queue left empty.
+    pending: BTreeSet<Arc<str>>,
+    /// A bulk change's notes not yet queued (see `Sweep`).
+    sweep: Option<Sweep>,
     /// Keys whose owners changed: their readers are still to be queued in `pending`.
     woken: Woken,
     history: History,
@@ -493,7 +514,8 @@ impl Default for LinkTable {
             notes: BTreeMap::new(),
             by_target: ByTarget::default(),
             readers: Readers::default(),
-            pending: HashSet::new(),
+            pending: BTreeSet::new(),
+            sweep: None,
             woken: Woken::default(),
             history: History::fresh(),
             log_paths: LOG_PATHS,
@@ -573,7 +595,7 @@ impl LinkTable {
     }
 
     pub(super) fn has_pending(&self) -> bool {
-        !self.pending.is_empty() || !self.woken.is_empty()
+        !self.pending.is_empty() || !self.woken.is_empty() || self.sweep.is_some()
     }
 
     /// Whether more than `n` notes are queued, counting every reader of a woken key (a bound:
@@ -581,7 +603,7 @@ impl LinkTable {
     /// so a save behind tens of thousands of woken keys looks at `n` of them, not all.
     pub(super) fn queued_over(&self, n: usize) -> bool {
         let mut work = self.pending.len();
-        if work > n {
+        if work > n || self.sweep.is_some() {
             return true;
         }
         for key in self.woken.keys() {
@@ -595,17 +617,68 @@ impl LinkTable {
         false
     }
 
-    /// Queue every note in the table and every path of `with_links` (review 6: a full name-map
-    /// rebuild with link work deferred). Jobs resolve them off the lock; the reverse maps stay
-    /// as they are, matching the entries, and move with each note as it is stored.
-    pub(super) fn requeue<'p>(&mut self, with_links: impl Iterator<Item = &'p str>) {
-        self.pending.reserve(self.notes.len());
-        self.pending.extend(self.notes.keys().cloned());
-        for path in with_links {
-            if !self.notes.contains_key(path) {
-                self.pending.insert(Arc::from(path));
+    /// Queue every note in the table and every file with links, a step at a time (review 6: a
+    /// full name-map rebuild with link work deferred). Review 7: only the walk's start is set
+    /// here, in constant work; `sweep` queues the notes. A later bulk change starts it over,
+    /// since notes it passed may read keys that change moved. Jobs resolve them off the lock;
+    /// the reverse maps stay as they are, matching the entries, and move with each note as it
+    /// is stored.
+    pub(super) fn requeue(&mut self) {
+        self.sweep = Some(Sweep::default());
+    }
+
+    /// Queue the next notes of a bulk change's walk, looking at `budget` entries and files at
+    /// most, less the notes queued already (so the queue stays near one step). Notes stored
+    /// meanwhile were resolved against the maps as they now stand, and new ones were queued by
+    /// their change, so a walk in path order misses none.
+    pub(super) fn sweep(&mut self, budget: usize, files: &super::file_map::Files) {
+        let Some(sweep) = &mut self.sweep else {
+            return;
+        };
+        let budget = budget.saturating_sub(self.pending.len());
+        if budget == 0 {
+            return;
+        }
+        let mut seen = 0;
+        if !sweep.entries_done {
+            let from = sweep.entries_after.as_deref().map_or(Bound::Unbounded, Bound::Excluded);
+            let mut last = None;
+            for path in self.notes.range::<str, _>((from, Bound::Unbounded)).map(|(path, _)| path).take(budget) {
+                self.pending.insert(Arc::clone(path));
+                last = Some(Arc::clone(path));
+                seen += 1;
+            }
+            if seen < budget {
+                sweep.entries_done = true;
+            } else {
+                sweep.entries_after = last;
             }
         }
+        if sweep.entries_done && seen < budget {
+            let mut last = None;
+            let mut done = true;
+            for (path, node) in files.after(sweep.files_after.as_deref()) {
+                if seen == budget {
+                    done = false;
+                    break;
+                }
+                seen += 1;
+                if super::has_links(path, node) && !self.notes.contains_key(path.as_str()) {
+                    self.pending.insert(Arc::from(path.as_str()));
+                }
+                last = Some(path);
+            }
+            if done {
+                self.sweep = None;
+            } else if let Some(last) = last {
+                sweep.files_after = Some(last.clone());
+            }
+        }
+        #[cfg(test)]
+        SWEPT.with(|n| {
+            let (all, most) = n.get();
+            n.set((all + seen, most.max(seen)));
+        });
     }
 
     /// Whether the table was ever filled (a fresh index's is not until its first rebuild).
@@ -630,11 +703,7 @@ impl LinkTable {
 
     /// Up to `n` queued notes, taken off the queue.
     pub(super) fn take_some(&mut self, n: usize) -> Vec<Arc<str>> {
-        let some: Vec<Arc<str>> = self.pending.iter().take(n).cloned().collect();
-        for path in &some {
-            self.pending.remove(path);
-        }
-        some
+        std::iter::from_fn(|| self.pending.pop_first()).take(n).collect()
     }
 
     /// Put `new` (or nothing, for a path that is no note with links any more) at `path`.
@@ -744,6 +813,7 @@ impl LinkTable {
         self.by_target = by_target;
         self.readers = readers;
         self.pending.clear();
+        self.sweep = None;
         self.woken.clear();
         self.stale.clear();
         self.staging = None;

@@ -20,7 +20,7 @@
 //! reads the vault. `vault_tags` is the five searches the Tags view made
 //! before step 1; `tags` is the one command it makes now.
 
-use super::{display_name, has_links, is_note_path, parents, Index, Stamp};
+use super::{display_name, is_note_path, parents, Index, Stamp};
 use std::path::Path;
 use std::time::Instant;
 
@@ -564,13 +564,12 @@ fn bench_link_deltas() {
     idx.remove_tree("bench-typing.md");
     // The queueing part of the write alone.
     let started = Instant::now();
-    let files = &idx.files;
-    idx.links.requeue(files.iter().filter(|(path, node)| has_links(path, node)).map(|(path, _)| path.as_str()));
+    idx.links.requeue();
     let requeue = elapsed_ms(started);
     settle_by_jobs(&mut idx);
     idx.set_defer_links(false);
     println!(
-        "GROVE_BENCH folder rename ({folder}), deferred: write_ms={} (of which queueing every note {requeue:.1}) settle_ms={} longest_hold_ms={}",
+        "GROVE_BENCH folder rename ({folder}), deferred: write_ms={} (of which marking the sweep {requeue:.3}) settle_ms={} longest_hold_ms={}",
         ms_list(&writes),
         ms_list(&settles),
         ms_list(&holds)

@@ -35,7 +35,7 @@ pub(super) struct Files {
 }
 
 pub(super) struct Walk<'a> {
-    inner: btree_map::Iter<'a, String, Arc<Node>>,
+    inner: btree_map::Range<'a, String, Arc<Node>>,
 }
 
 impl<'a> Iterator for Walk<'a> {
@@ -122,7 +122,14 @@ impl Files {
 
     /// Every node, in path order. Each yield counts as a file-list visit.
     pub(super) fn iter(&self) -> Walk<'_> {
-        Walk { inner: self.map.iter() }
+        Walk { inner: self.map.range::<str, _>(..) }
+    }
+
+    /// The nodes after `after` (all of them for `None`), in path order. Each yield counts as a
+    /// file-list visit.
+    pub(super) fn after(&self, after: Option<&str>) -> Walk<'_> {
+        let from = after.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded);
+        Walk { inner: self.map.range::<str, _>((from, std::ops::Bound::Unbounded)) }
     }
 
     /// Every path. Each yield counts as a file-list visit.

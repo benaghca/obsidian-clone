@@ -166,8 +166,12 @@ export function createGraphView(host: GraphHost) {
   let refreshTimer = 0;
   let seq = 0;
   let stale = true;
-  /** A sliced rebuild is under way, from the links as they were when it started. */
-  let building = false;
+  /**
+   * The sliced rebuild under way (its `seq`), from the links as they were when it started; 0
+   * for none. Review 7: one cancelled by `scheduleRebuild` is no longer under way, and only a
+   * build's own `seq` clears it, so an older one stopping never clears a newer one's.
+   */
+  let building = 0;
   /** A rebuild's new layout graph, waiting for the tick under way to end (`step`). */
   let waiting: Prepared | null = null;
 
@@ -200,7 +204,7 @@ export function createGraphView(host: GraphHost) {
       const { model: next, groups } = yield* built_;
       return yield* prepare(next, groups);
     })();
-    building = true;
+    building = mine;
     let step = steps.next();
     if (built && devBuildHold && devBuildHolding?.()) {
       await devBuildHold();
@@ -219,7 +223,7 @@ export function createGraphView(host: GraphHost) {
       }
       step = steps.next();
     }
-    building = false;
+    if (building === mine) building = 0;
     const installing = performance.now();
     // A new layout graph goes in between ticks: the next frame puts it in once the tick under
     // way ends (review 4). Anything else goes in now.
@@ -332,10 +336,14 @@ export function createGraphView(host: GraphHost) {
     stale = true;
     // A model still waiting to go in is older than what asked for this rebuild: drop it, and
     // the shown one stays up until the rebuild is done (review 5). So is one still being built
-    // (review 6): it stops at its next slice instead of going in. A first build still finishes,
-    // so a new graph is never left empty.
+    // (review 6): it stops at its next slice instead of going in, and (review 7) no longer
+    // counts as under way for `linksMatter`. A first build still finishes, so a new graph is
+    // never left empty.
     waiting = null;
-    if (built) seq++;
+    if (built) {
+      seq++;
+      building = 0;
+    }
     clearTimeout(refreshTimer);
     if (active) refreshTimer = window.setTimeout(() => void rebuild(), delay);
   }
@@ -654,7 +662,7 @@ export function createGraphView(host: GraphHost) {
     // A rebuild in flight read older links than these: judge nothing against the old model.
     // Nor while a rebuilt model waits to go in (review 5): it was built from links before these,
     // and the shown model says nothing about the notes it adds.
-    if (building || waiting) return true;
+    if (building !== 0 || waiting) return true;
     const { links, linkPrev } = ws.vault;
     return localLinksMatter(
       touched,

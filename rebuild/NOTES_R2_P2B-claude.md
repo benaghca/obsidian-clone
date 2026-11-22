@@ -1244,3 +1244,143 @@ Each mutation was applied alone and its tests run. All 6 were caught.
   - This time `test-drawing-editor.mjs` passed inside the chain.
 - **Browser bench:** not rerun. The graph's frame path is unchanged; `scheduleRebuild` only bumps a counter.
 - The test runs rewrote 62 `rebuild/round*-shots` files; they were restored before committing.
+
+## Review round 7
+
+Codex review 7 of `581ba91` (PASS-WITH-FIXES, written to `/tmp/r2-p2b-codex-review6.md`): one P2 and four P3 findings. The task for this round names three of them.
+
+- The P2 (bulk link work under the write lock) is fixed.
+- The bulk-queue-capacity P3 is fixed.
+- The cancelled-graph-build P3 is fixed.
+- The mixed-type Bases sort (#4) and the rescan finish (#5) are left as known follow-ups, as the task says (see "Still open").
+
+Each fix is the smallest one I found for its finding. Limits as before.
+
+### P2: a bulk change still queued every note under the write lock
+
+**The problem.** Round 6 took the full link resolution out of a bulk change (a large folder moved, deleted or added), but the write still queued every note itself. `LinkTable::requeue` reserved and filled the pending set from the whole table, then walked the whole file list. That took about 15 ms at 50k notes in release, inside a 67–83 ms write. The latency test also started its saves only after the write let go of the lock, so a save waiting on the write itself was never measured.
+
+**The fix** (`index/link_table.rs`, `index.rs`, `index/link_jobs.rs`, `index/file_map.rs`):
+
+- **The write only marks the walk.** The name maps are still rebuilt under the lock, as required. Then `requeue` sets a `Sweep` (the walk's start) in constant work. A later bulk change resets it, so the walk starts over.
+- **The walk runs in steps.** `LinkTable::sweep(budget, files)` queues the next notes, a step at a time, in path order:
+  1. the table's old entries;
+  2. then the files with links that have no entry yet. Nodes from the bulk change itself queue nothing (`put_node` skips while the maps are dirty), so this second pass is needed.
+- **Where it runs.** `link_job` sweeps before it expands woken keys (budget `EXPAND_STEP`), and `settle_links_until` does too (`SETTLE_STEP`).
+- **The queue stays small.** Each step looks at no more than its budget, less the notes already queued, so the queue stays near one step instead of growing to the vault.
+- **Pending and saves.** The walk counts as pending (`has_pending`). While it runs, the inline estimate (`queued_over`) says "too much" at once, so a save during the walk leaves the work to the jobs.
+- **Why the walk misses nothing.**
+  - An entry stored meanwhile was resolved against the current maps, by a job begun after the rebuild. Jobs begun before it are dropped, since `edits.restart()` starts a new epoch.
+  - A note added or changed meanwhile was queued by its own change.
+  - A later bulk change starts the walk over, since notes already passed may read keys it moved.
+- **A file walk from a cursor.** `Files::after(path)` walks the file list from a point (the `BTreeMap` range). `Files::iter` now uses the same range type.
+
+**Tests:**
+
+- **`a_bulk_change_queues_every_note_for_jobs_and_settles_to_a_full_walk`** (unit test, small steps) now also checks:
+  - the folder move swept nothing and queued no note itself;
+  - no job step swept more than its budget;
+  - the queue never held more than 8 notes.
+- **The second bulk change in that test now comes later.** The folder delete happens at job 200, once the walk has passed `l/0.md`, which reads `g/n0.md`. Without the restart, `l/0.md` keeps its `g/` link, and the final full-walk comparison fails on it.
+- **`queued_saves_of`, used by every latency test in `link_page_tests.rs`, now queues one save on the lock before the write lets go of it.**
+  - The test holds the guard, starts a thread that asks for the lock, gives it 5 ms to block, then runs the write.
+  - It asserts:
+    - the write swept nothing (`Index::take_swept`);
+    - the queued save waited no longer than the write, plus its 5 ms head start, plus a quarter of the settle;
+    - the time from release to that save being done counts in the worst-save bound.
+
+### P3: a large pending queue left its capacity to later saves
+
+**The problem.** The pending set was a `HashSet`. Once it had grown to vault size and been drained, taking the first few notes from it scanned every bucket the drain had left empty. Both `take_some` and `link_job`'s walk over `pending()` did this, under the write lock.
+
+**The fix:**
+
+- The pending set is a `BTreeSet<Arc<str>>`, and `take_some` uses `pop_first`. Taking the first entries follows the queued items, and draining frees nodes as it goes.
+- The new walk also keeps the queue near one step during a bulk change.
+
+**Test:** `a_queue_drained_after_a_large_bulk_update_is_quick_to_take_from` (unit).
+
+- 200,000 notes are queued, as a round-6 bulk change did, and all but one are taken off.
+- Then 2,000 rounds each queue one note, look at the first and take two.
+- They take 1.4 ms in debug. With the hash set put back they take 462 ms, over the test's 40 ms bound.
+
+### P3: a cancelled graph build kept the refresh debounce live on irrelevant events
+
+**The problem.** Since round 6, `scheduleRebuild` cancels a build under way by bumping `seq`. The cancelled build then returned at its next slice without clearing `building`. Until another build finished, `linksMatter` treated every link change as relevant. Each one, even for a note the graph cannot show, reset the 200 ms refresh timer, so a steady stream of them kept the local graph stale.
+
+**The fix** (`graph/view.ts`):
+
+- `building` now holds the `seq` of the build under way (0 for none).
+- `scheduleRebuild` clears it when it cancels that build.
+- The end of a build clears it only if it is still that build's own (`building === mine`), so an older one stopping never clears a newer one's. Every await in `rebuild` is followed by a `seq` check, so today an older build never reaches that line anyway. The guard is checked by inspection only.
+
+**Test:** `scripts/test-link-refresh-guards.mjs` part 6 (in `npm test`).
+
+- **The cancel.** The local graph of P3 has its rebuild for P3 → Q3 held, using the dev-only hold from round 6. Q3 then gains `[[R3]]`. That change cancels the held build, and a listener ends the hold in the same change.
+- **The stream.** For 1.5 s, X3.md (outside the graph) gains a new link every 60 ms, and the link index is refreshed after each.
+- **The check.** The graph must show the 7 nodes of the new build by the end of the stream.
+- **Without the fix,** I ran it against the unfixed code first: it stays at 3 nodes ("3 !== 7"). With the fix it passes, with 25 irrelevant changes in the stream.
+
+### Measurements (review 7)
+
+**Rust, release** (`bench_link_deltas`, `/tmp/grove-bench-50000`, 50,125 notes), deferred folder rename of Folder 01, ten runs:
+
+| | Round 6 | Round 7 |
+|---|---|---|
+| The write (lock held) | 67–83 ms | **58–61 ms** |
+| Of which queueing link work | 14.6 ms | **0.000 ms** (marking the walk) |
+| Settle off the lock | 258–298 ms | 237–257 ms |
+| Longest hold while settling | 0.1–0.7 ms | 0.8–0.9 ms |
+
+- The rest of the write is the name-map rebuild (`maps_ms` 46.3 in the same run), which the review keeps under the lock, and the move itself.
+- The longest settle hold is a little higher. A job step now also sweeps up to `EXPAND_STEP` entries and files, and the queue is taken in path order.
+- Other rows are within noise of round 6:
+  - shared alias, off-lock jobs: 87.8 ms, hold 0.64 ms;
+  - 160k-link note: 433 ms, hold 0.64 ms;
+  - 40k-link note: 100 ms, hold 0.37 ms;
+  - 100 notes of 5,000 links: 1.34 s (1.21 s in round 6), hold 0.06 ms.
+- Scan median 1.08 s, RSS 627 MB.
+
+**Debug latency tests** (`link_page_tests`, 10,400 notes, with the new queued save):
+
+| Case | Write | The queued save: waited / after release | Worst save while settling |
+|---|---|---|---|
+| 400-note folder moved | 17.9 ms (27–29 ms in round 6) | 23.0 ms / 0.19 ms | 3.0 ms |
+| 400-note folder deleted | 18.9 ms | 23.9 ms / 0.18 ms | 2.7 ms |
+| 300 notes added outside the app | 21.5 ms | 26.5 ms / 0.24 ms | 4.1 ms |
+
+Each queued save's wait is the write plus its 5 ms head start; it takes no link work with it.
+
+### Mutation checks (review 7)
+
+Each mutation was applied alone and its tests run. All 5 were caught.
+
+- **A later bulk change keeps the walk where it was** (`get_or_insert` in `requeue`): caught by `a_bulk_change_queues_every_note_for_jobs_and_settles_to_a_full_walk` ("link table vs every note resolved again: l/0.md", which kept `g/n0.md`).
+- **The walk skips the file pass:** caught by `deferred_link_updates_settle_to_a_full_walk`, `stepped_replies_equal_replies_made_at_once` and `a_save_behind_a_bulk_folder_change_stays_quick`.
+- **The bulk write queues every entry itself** (round 6's behaviour, with the walk left in): caught by the same bulk unit test ("the bulk write queued no note itself").
+- **The pending queue back to a `HashSet`:** caught by `a_queue_drained_after_a_large_bulk_update_is_quick_to_take_from` (462 ms against its 40 ms bound).
+- **A cancelled build keeps `building` set** (the round-6 code): caught by `test-link-refresh-guards.mjs` part 6 ("the rebuild went in while X3 kept changing": 3 !== 7).
+- **The `building === mine` guard at a build's end:** not checked by a test. Every await in `rebuild` is followed by a `seq` check, so no older build reaches that line today. It is there to keep it that way.
+
+### Still open after review 7
+
+- **Known follow-up, #4 (not required this round):** a mixed-type Bases sort column still sorts on the UI thread in one task. The worker version (precomputed keys, the engine's own comparator, superseded replies dropped, checked against the synchronous order and limit, measured on 50k rows) is left for a later round.
+- **Known follow-up, #5 (not required this round):** a rescan's finish still does filesystem replay, the file and link diffs, history cloning and the format-cache walk under the lock (3 ms in debug at 10k notes). Preparing those from a versioned snapshot off the lock, with bounded reconciliation and a version check at the swap, is left for a later round.
+- After a bulk change the write still rebuilds the name maps under the lock (about 46 ms at 50k in release), as the review asks.
+- At 50k notes a graph tick still costs about 95 ms of work, spread over frames of at most 12 ms.
+- The other index maps (files and name maps) still grow by rehashing in one hold when the vault itself grows.
+
+### Suites (review 7)
+
+- **`cargo test --offline`:** **239 passed**, 0 failed, 7 ignored. That is 238 at `581ba91` plus the new sparse-queue test. The bulk unit test and every `queued_saves_of` latency test were extended.
+- **`cargo clippy --all-targets`:** nothing new. The hits near touched code (`file_map.rs` `ValueWalk`, `len` and `values`; `search.rs` `seen`) were already there.
+- **`npm run build`** (`tsc` and `vite build`): clean. The bundle has no trace of `__graphHold` or `__graphBuildHold`.
+- **`vitest`:** **1714 / 1714**.
+- **`npm test`:** the chain passed up to `test-drawing-editor.mjs`, including `test-link-refresh-guards.mjs` with its new part 6. That step then failed its timing check, "Editing one shape and all 2000 has no task over 50ms" (one task of 51 ms), under a load average of about 5. This round changes no drawing code.
+- **The rest, run on their own right after:**
+  - `test-drawing-editor.mjs` passed, as did every later step of the chain.
+  - The first 11 of the 12 `posttest` steps passed.
+  - The last, `test-bases-edge.mjs`, failed its 10k-row scroll check: "p95 16.8 max 183.3", then "max 33.4" twice on its own, at a load average of about 9.
+  - This is the same load-dependent check as in rounds 5 and 6. The review found no link to the link work, and this round changes no Bases code, so I didn't chase it.
+- **Browser bench:** not rerun. The graph's frame path is unchanged; only the `building` marker changed.
+- The test runs rewrote 62 `rebuild/round*-shots` files; they were restored before committing.

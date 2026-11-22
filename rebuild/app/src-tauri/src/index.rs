@@ -420,6 +420,7 @@ impl Index {
         }
         let mut changed = Vec::new();
         while self.links.has_pending() {
+            self.links.sweep(SETTLE_STEP, &self.files);
             self.links.expand(SETTLE_STEP);
             for path in self.links.take_some(SETTLE_STEP) {
                 let resolved = self
@@ -441,6 +442,13 @@ impl Index {
         }
         self.links.record(changed);
         !self.links.has_pending()
+    }
+
+    /// Tests: notes a bulk change's link walk looked at on this thread, in all and in its
+    /// largest step (resets; see `LinkTable::sweep`).
+    #[cfg(test)]
+    pub(crate) fn take_swept() -> (usize, usize) {
+        link_table::take_swept()
     }
 
     /// Resolve every queued note now.
@@ -919,8 +927,9 @@ impl Index {
             // Review 6: a bulk change (a large folder deleted, moved or added) re-resolves no
             // note under the lock. Every note is queued instead, and jobs resolve them off it
             // against the maps as they then stand, checking the edits since (`link_jobs`).
-            let files = &self.files;
-            self.links.requeue(files.iter().filter(|(path, node)| has_links(path, node)).map(|(path, _)| path.as_str()));
+            // Review 7: in steps, as jobs and settles go (`LinkTable::sweep`); here only its
+            // start is marked.
+            self.links.requeue();
         } else {
             self.rebuild_links();
         }

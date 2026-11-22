@@ -141,6 +141,7 @@ impl Index {
         }
         debug_assert!(self.defer_depth == 0 && !self.maps_dirty, "a link job inside a change");
         let trash = self.links.clean(budget(CLEAN_STEP));
+        self.links.sweep(budget(EXPAND_STEP), &self.files);
         self.links.expand(budget(EXPAND_STEP));
         let mut notes = Vec::new();
         let mut links = 0;
