@@ -48,9 +48,10 @@ describe("canvas zoom glide", () => {
         expect(sign * (target - f.scale)).toBeGreaterThanOrEqual(-1e-12);
         last = f.scale;
       }
-      // Eased at both ends: the first frame takes a fraction of the way, and the speed falls to zero.
+      // Eased at both ends: it starts and ends at rest, and the first frame takes a fraction of the way.
       expect(Math.abs(Math.log2(frames[0].scale / from))).toBeLessThan(Math.abs(Math.log2(target / from)) * .35);
-      expect(Math.abs(glideAt(g, ms * .999).rate)).toBeLessThan(Math.abs(glideAt(g, 0).rate) * .01);
+      expect(glideAt(g, 0).rate).toBe(0);
+      expect(Math.abs(glideAt(g, ms * .999).rate)).toBeLessThan(Math.abs(glideAt(g, ms / 2).rate) * .01);
       expect(glideAt(g, ms).done).toBe(true);
     }
   });
@@ -75,10 +76,10 @@ describe("canvas zoom glide", () => {
     expect(end.cam.scale).toBe(target);
     expect(target).toBeCloseTo(.5 * 2 ** 2, 12);
     // No frame jumps by a whole notch, and the board never stops between ticks:
-    // the six ticks became one glide, not six jumps.
+    // the six ticks became one glide, not six jumps. (The first frames are the ease-in from rest.)
     expect(biggest).toBeLessThan(1 / 3 * .6);
     const mean = burst.reduce((a, b) => a + b) / burst.length;
-    expect(Math.min(...burst.slice(1))).toBeGreaterThan(mean * .3);
+    expect(Math.min(...burst.slice(3))).toBeGreaterThan(mean * .3);
     const [wx, wy] = under(end.cam, x, y);
     expect(wx).toBeCloseTo(fixed[0], 9);
     expect(wy).toBeCloseTo(fixed[1], 9);
@@ -88,11 +89,83 @@ describe("canvas zoom glide", () => {
     const g = retarget(undefined, 1, 2 ** (1 / 3), 0, 200)!;
     const before = glideAt(g, 60);
     const next = retarget(g, 1, 2 ** (2 / 3), 60, 200)!;
-    expect(glideAt(next, 60).rate).toBeGreaterThanOrEqual(before.rate - 1e-12);
-    // A tick back the other way starts a fresh ease-out toward the new target.
+    expect(glideAt(next, 60).rate).toBeCloseTo(before.rate, 12);
+    // A tick back the other way slows the board to a stop, then heads back and lands.
     const back = retarget(g, 1, 1, 60, 200)!;
     expect(glideAt(back, 60).log).toBeCloseTo(before.log, 12);
-    expect(glideAt(back, 70).log).toBeLessThan(before.log);
+    expect(glideAt(back, 60).rate).toBeCloseTo(before.rate, 12);
+    expect(glideAt(back, 61).log).toBeGreaterThan(before.log);
+    // Its run-on stays short of the old target.
+    let peak = -Infinity;
+    for (let t = 60; t <= 260; t += .5) peak = Math.max(peak, glideAt(back, t).log);
+    expect(peak).toBeLessThan(1 / 3);
+    expect(glideAt(back, 260).log).toBe(0);
+  });
+
+  // Inputs at `at` ms of `step` octaves around a fixed point, sampled every 0.25 ms.
+  // The speed (log2 per ms) must never change abruptly: not at a retarget, not at the start, not at the end.
+  function speeds(inputs: { at: number; step: number }[], start = 1) {
+    let g: Glide | undefined, target = start, scale = start;
+    const samples: { t: number; log: number; rate: number }[] = [];
+    let i = 0;
+    for (let t = inputs[0].at - 5; t < inputs.at(-1)!.at + 600; t += .25) {
+      for (; i < inputs.length && inputs[i].at <= t; i++) {
+        target = clampZoom(target * 2 ** inputs[i].step);
+        g = retarget(g, scale, target, t, glideMs(inputs[i].step)) ?? g;
+      }
+      const at = g ? glideAt(g, t) : { log: Math.log2(scale), rate: 0, done: true };
+      scale = at.done && g ? g.target : 2 ** at.log;
+      if (at.done) g = undefined;
+      samples.push({ t, log: Math.log2(scale), rate: at.rate });
+    }
+    return { samples, target };
+  }
+  function expectSmooth(inputs: { at: number; step: number }[], start = 1) {
+    const { samples, target } = speeds(inputs, start);
+    const peak = Math.max(...samples.map(s => Math.abs(s.rate)));
+    expect(peak).toBeGreaterThan(0);
+    // The speed changes by under 3% of its peak in any 0.25 ms, including across every input.
+    let jump = 0;
+    for (let k = 1; k < samples.length; k++) jump = Math.max(jump, Math.abs(samples[k].rate - samples[k - 1].rate));
+    expect(jump).toBeLessThan(peak * .03);
+    // It starts and ends at rest, lands on the target, and never leaves the limits.
+    expect(samples[0].rate).toBe(0);
+    expect(samples.at(-1)!.rate).toBe(0);
+    expect(2 ** samples.at(-1)!.log).toBeCloseTo(target, 9);
+    for (const s of samples) { expect(s.log).toBeGreaterThanOrEqual(-4); expect(s.log).toBeLessThanOrEqual(1); }
+    return samples;
+  }
+
+  it("keeps the speed continuous across rapid wheel ticks", () => {
+    expectSmooth([0, 30, 60, 90, 120].map(at => ({ at, step: 1 / 3 })));
+    // A slowing glide that gets another tick picks up again smoothly, not in one step.
+    expectSmooth([{ at: 0, step: 1 / 3 }, { at: 170, step: 1 / 3 }]);
+  });
+
+  it("slows down before it turns around when a wheel reverses", () => {
+    for (const gap of [20, 60, 100, 160]) {
+      const samples = expectSmooth([{ at: 0, step: 1 / 3 }, { at: gap, step: -1 / 3 }]);
+      // The speed crosses zero once, smoothly, instead of flipping sign.
+      const after = samples.filter(s => s.t >= gap && s.rate !== 0);
+      const flips = after.filter((s, k) => k && Math.sign(s.rate) !== Math.sign(after[k - 1].rate)).length;
+      expect(flips).toBeLessThanOrEqual(1);
+    }
+    // Back and forth several times.
+    expectSmooth([0, 40, 80, 120, 160].map((at, k) => ({ at, step: k % 2 ? -1 / 3 : 1 / 3 })));
+  });
+
+  it("keeps the speed continuous through a pinch that opens and then closes", () => {
+    const pinch = [];
+    for (let k = 0; k < 40; k++) pinch.push({ at: k * 8, step: (k < 25 ? 1 : -1) * 6 / 300 });
+    expectSmooth(pinch);
+  });
+
+  it("stays within the limits when a glide toward one turns around", () => {
+    // Headed for the cap at full speed, then reversed: the run-on stops short of 2x.
+    expectSmooth([{ at: 0, step: 1 }, { at: 60, step: -1 / 3 }], 1.6);
+    expectSmooth([{ at: 0, step: -1 }, { at: 60, step: 1 / 3 }], 1 / 12);
+    const { samples } = speeds([{ at: 0, step: 1 }, { at: 60, step: -1 / 3 }], 1.6);
+    expect(Math.max(...samples.map(s => s.log))).toBeLessThanOrEqual(1);
   });
 
   it("respects the zoom limits, and a wheel at the limit changes nothing", () => {

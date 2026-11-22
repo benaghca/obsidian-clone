@@ -45,6 +45,11 @@ await withBrowser(async ({ send, run, click, press, check }) => {
     const frame = () => { if (new DOMMatrix(document.querySelector('.canvas-world').style.transform).a > value || performance.now() > until) resolve(); else requestAnimationFrame(frame); };
     frame();
   }), value);
+  const paintedBelow = value => run(value => new Promise(resolve => {
+    const until = performance.now() + 1000;
+    const frame = () => { if (new DOMMatrix(document.querySelector('.canvas-world').style.transform).a < value || performance.now() > until) resolve(); else requestAnimationFrame(frame); };
+    frame();
+  }), value);
   const fastDouble = async (p) => {
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y });
     for (const clickCount of [1, 2]) {
@@ -244,9 +249,12 @@ await withBrowser(async ({ send, run, click, press, check }) => {
   check(!(await look()).out, 'content is showing before the zoom into title mode');
   const into = await cardPoint('t');
   const intoScale = (await look()).scale;
-  await wheel(into, -300 * Math.log2(0.32 / intoScale), true);
+  // A press stops the glide where it is painted (R2 CZ fix 1), so aim far past title
+  // mode and double-click once the painted zoom is in it, well before the wheel settles.
+  await wheel(into, -300 * Math.log2(0.1 / intoScale), true);
+  await paintedBelow(0.44);
   await fastDouble(into);
-  await sleep(80);
+  await sleep(20);
   const editedEarly = await run(() => {
     const card = document.querySelector('[data-node-id="t"]');
     return { editing: card.classList.contains('is-editing'), editor: !!card.querySelector('.cm-editor'), out: document.querySelector('.canvas-world').classList.contains('is-zoomed-out') };

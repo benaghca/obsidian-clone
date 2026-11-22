@@ -150,3 +150,75 @@ All exited 0.
 
 ## Rules
 No new crates or npm packages. No network. No Obsidian or Excalidraw code or assets; the behaviour is built from the brief. No GUI window was opened and Grove was not launched. Test vaults were only the harness's scratch mock vault. The `round23-shots` files the tests rewrite were restored before committing.
+
+## Fix 1
+
+From the Codex review (`FAIL`, two P2s and two P3s). Both P2s and P3 #3 are fixed. P3 #4 (native WebKitGTK pinch and settled text) needs a native session and is not done.
+
+### P2 #1: a press mid-glide no longer jumps to the target
+- `navigation.ts`: a pointerdown during a wheel or pinch glide now **stops the glide where it was last painted** (`haltGlide`). Before, it landed the glide on its target (`landGlide`).
+  - `state` is already the painted camera, because `glideFrame` draws each camera as it sets it. So nothing moves on the press.
+  - The browser hit-tested the press against the board as painted, and that board stays put. A left press reaches the card that is under the pointer.
+  - A middle or Space pan uses that camera as its baseline, and so does a card drag (it reads the transform at the press).
+  - The band settles by the usual rule, 120 ms after the last zoom input.
+- `test-canvas-zoom-glide.mjs`: the instant-landing check is replaced. The page records the world and the pressed card before and after the board's own pointerdown handlers.
+  - **Middle press mid-glide:** the painted scale is between the start and the target, it is the same a frame after the press, and it stays the same while the press is held and after release.
+  - **Left press on card `a` mid-glide**, away from the wheel's point: the event hits `a`. After the handlers the world scale and `a`'s rect are unchanged and `a` is still under the pointer. The scale stays put while the card is held.
+
+### P2 #2: the speed never jumps across inputs
+`zoomGlide.ts` changes:
+- A glide now stores its starting **speed** (log2 per ms) instead of a slope multiple. It is a Hermite cubic from that speed down to rest at the target.
+- **From rest:** the speed starts at 0 (ease in and out). The old start slope of 2 made the speed jump at the first input.
+- **Same-direction retarget:** keeps the board's actual speed. The old floor of 2 sped up a slowing glide in one step.
+  - If that speed would overshoot (a start slope above 3), the segment gets shorter instead. It still starts at the board's speed and never passes the target.
+- **Reverse retarget:** also starts at the board's speed, so the board slows to a stop and then heads back.
+  - The run-on peaks at u = m / (3(m − 2d)), which has a closed form.
+  - It must stop short of the old target when that target lies ahead, and short of the zoom limits otherwise. Where it would not, the segment is shortened step by step until it fits; as a last resort it starts from rest.
+- `glideAt` clamps each frame to the limits as a backstop, and so does `glideFrame`.
+- Fixed while testing: the overshoot test compared unnormalised values, which flipped for zoom-out. It now compares `speed·ms/d > 3`.
+
+New `zoomGlide.test.ts` cases (4, sampled every 0.25 ms). Each one checks:
+- in any 0.25 ms the speed changes by under 3% of its peak, across every input;
+- the glide starts and ends at rest;
+- it lands on the target;
+- every sample is within the limits.
+
+The cases:
+- five rapid same-direction ticks, and a second tick on a slowing glide;
+- a wheel reversal at 20, 60, 100 and 160 ms (the speed crosses zero at most once), plus five alternating ticks;
+- a 40-step pinch that opens and then closes;
+- a full-speed glide toward 2x (and toward 1/16x) that reverses: the run-on stays at or under the limit.
+
+Two existing unit assertions encoded the old slope and were updated:
+- "eased at both ends" now checks a zero starting speed, and the end speed against the mid-glide speed.
+- "a reverse tick turns back" now checks that the speed carries over, the board runs on briefly, the run-on stays under the old target, and it lands.
+
+The merge test skips the first two frames of ease-in from rest before it checks for still frames.
+
+### P3 #3: no selection-menu walk on every glide frame
+- `navigation.ts` keeps a `MutationObserver` on the world's direct children (`childList` only).
+- When no menu is found, that absence is cached until the children change. `takeRecords()` is read before trusting the cache, so a menu appended in the same task is still found.
+- A found menu is used as before for as long as it stays attached.
+- The observer is disconnected on dispose.
+
+### Existing test adjusted
+`test-canvas-edge-titles.mjs`, "a double-click before title mode settles edits the card":
+- The old check wheeled toward 0.32 and double-clicked at once. It relied on the press landing the glide on 0.32. With the press now halting the glide at about 0.69, title mode never came.
+- It now wheels toward 0.1, waits until the painted zoom is below 0.44 (`paintedBelow`), double-clicks, and reads the editor 20 ms later instead of 80 ms, still before the 120 ms settle.
+- Both title-mode assertions are unchanged, and both passed on two runs.
+
+### Results (Fix 1)
+One at a time under `heavy`:
+
+| Suite | Result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `vitest run src/canvas/zoomGlide.test.ts` | 9 passed (5 existing + 4 new) |
+| `test-canvas-zoom-glide.mjs` | 30 PASS (was 26) |
+| `test-canvas-navigation.mjs` | 92 PASS; 300/400 trace: pan 0 drops, zoom 0 drops, rAF p95 16.7 ms |
+| `test-canvas-edge-titles.mjs` | 45 PASS (run twice) |
+
+- A notch measured in the browser is still 14 frames over about 217 ms. It is monotone, and the anchor drifts at most 0.005 board px.
+- The first frame now moves 0.4% of the scale; before it moved more, from the start slope of 2.
+- Not run: the other canvas suites (only waits or unrelated paths touch the glide) and native WebKitGTK.
+- The `round23-shots` files the tests rewrite were restored.

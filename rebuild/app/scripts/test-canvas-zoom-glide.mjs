@@ -12,7 +12,7 @@ const board = {
   edges: [{ id: 'e', fromNode: 'a', toNode: 'b', fromSide: 'right', toSide: 'left', label: 'Edge label' }],
 };
 
-await withBrowser(async ({ send, on, run, click, move, point, check, open }) => {
+await withBrowser(async ({ send, on, run, click, move, point, check, open, press }) => {
   await open('Glide.canvas', board, 600);
   const button = label => `.canvas-controls [aria-label="${label}"]`;
   const view = () => run(() => { const r = document.querySelector('.canvas-view').getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; });
@@ -86,14 +86,52 @@ await withBrowser(async ({ send, on, run, click, move, point, check, open }) => 
     check(list.at(-1).s === limit && list.every(f => f.s <= 2 && f.s >= 1 / 16), 'A huge wheel glides to the ' + name + ' and never passes it');
   }
 
-  // Pressing on the board lands a glide on its target, so a drag starts from the zoom asked for.
-  await click(button('Reset zoom')); await move(p); await atRest();
-  await wheel(p, -100); await sleep(50);
-  await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...p, button: 'middle', clickCount: 1 });
-  const pressed = (await state()).s; await sleep(150);
-  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...p, button: 'middle', clickCount: 1 });
-  const afterPress = (await state()).s;
-  check(Math.abs(pressed - 2 ** (1 / 3)) < 1e-5 && Math.abs(afterPress - pressed) < 1e-5, 'A press on the board lands the zoom glide on its target at once (' + pressed.toFixed(4) + ')');
+  // Pressing on the board mid-glide stops it where it was painted: no jump to the
+  // target, so the press lands on what the browser hit-tested and a drag starts there.
+  // The page records the world and the pressed card before and after the board's own
+  // pointerdown handlers run.
+  const watchPress = () => run(() => {
+    const look = e => {
+      const m = new DOMMatrix(document.querySelector('.canvas-world').style.transform), card = e.target.closest?.('.canvas-node');
+      const under = document.elementFromPoint(e.clientX, e.clientY)?.closest('.canvas-node');
+      return { s: m.a, x: m.e, y: m.f, card: card?.dataset.nodeId ?? null, under: under?.dataset.nodeId ?? null, rect: card ? JSON.stringify(card.getBoundingClientRect()) : null };
+    };
+    window.pressLook = {};
+    addEventListener('pointerdown', e => { pressLook.before = look(e); }, { capture: true, once: true });
+    addEventListener('pointerdown', e => { pressLook.after = look(e); }, { once: true });
+    // The middle press pans, so the bubbling listener may not see it; read after a frame too.
+    addEventListener('pointerdown', e => requestAnimationFrame(() => { pressLook.frame = look(e); }), { capture: true, once: true });
+  });
+  const pressDuring = async (at, button) => {
+    await move(p); await atRest();
+    await wheel(p, -100); await move(at); await sleep(20);
+    await watchPress();
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button, buttons: button === 'middle' ? 4 : 1, clickCount: 1 });
+    await sleep(40);
+    const held = []; for (let i = 0; i < 5; i++) { held.push((await state()).s); await sleep(30); }
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at, button, clickCount: 1 });
+    return { look: await run(() => pressLook), held, after: (await state()).s };
+  };
+  const target = 2 ** (1 / 3), between = s => s > 1 + 1e-3 && s < target - 1e-3;
+  // A middle press (a pan) away from the wheel's point.
+  await click(button('Reset zoom'));
+  const mid = await pressDuring({ x: p.x - 200, y: p.y + 120 }, 'middle');
+  check(between(mid.look.before.s) && Math.abs(mid.look.frame.s - mid.look.before.s) < 1e-6, 'A middle press mid-glide keeps the painted zoom instead of jumping to the target (' + mid.look.before.s.toFixed(4) + ' -> ' + mid.look.frame.s.toFixed(4) + ')');
+  check(mid.held.every(s => Math.abs(s - mid.look.before.s) < 1e-6) && Math.abs(mid.after - mid.look.before.s) < 1e-6, 'The zoom stays put while the press is held and after it (' + mid.held.map(s => s.toFixed(4)).join(' ') + ')');
+  // A left press on a card near its corner, away from the wheel's point: the card the
+  // browser hit-tested is still under the pointer, at the same place, after the press.
+  // The limit checks left the board far off, so centre card a at 100% first.
+  await run(() => import('/src/canvas/navigation.ts').then(({ canvasViewports }) => {
+    Object.assign(canvasViewports.get(ws.active), { cx: 160, cy: 100, scale: 1 });
+    document.querySelector('.canvas-view').dispatchEvent(new WheelEvent('wheel', { ctrlKey: true, cancelable: true }));
+  }));
+  await atRest();
+  const edgeOfA = await run(() => { const r = document.querySelector('[data-node-id="a"]').getBoundingClientRect(), v = document.querySelector('.canvas-view').getBoundingClientRect(); return { x: Math.round(Math.max(r.left, v.left) + 30), y: Math.round(Math.max(r.top, v.top) + 30) }; });
+  const left = await pressDuring(edgeOfA, 'left');
+  check(left.look.before.card === 'a' && between(left.look.before.s), 'A left press mid-glide hits the card under the pointer (' + JSON.stringify([left.look.before.card, left.look.before.s.toFixed(4)]) + ')');
+  check(left.look.after.s === left.look.before.s && left.look.after.rect === left.look.before.rect && left.look.after.under === 'a', 'The press does not move the board: the pressed card is still under the pointer, where it was hit');
+  check(left.held.every(s => Math.abs(s - left.look.before.s) < 1e-6), 'The zoom stays put while the card is held (' + left.held.map(s => s.toFixed(4)).join(' ') + ')');
+  await press('Escape'); await atRest();
 
   // Crisp: while the board moves it is one scaled layer; at rest nothing on it is.
   let layers = [];

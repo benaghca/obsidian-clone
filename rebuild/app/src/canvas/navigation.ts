@@ -89,9 +89,16 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     if (wheel && !flush) postponeBand();
     else if (flush || first) applyBand(scale);
   }
-  // The selection menu is appended to the world after the cards; look from the end.
+  // The selection menu is appended to the world after the cards; look from the end,
+  // and only after the world's children change, not on every frame of a glide.
+  let menuKnown = false;
+  const worldChildren = new MutationObserver(() => { menuKnown = false; });
+  worldChildren.observe(world, { childList: true });
   function selectionMenu() {
     if (menu?.parentElement === world) return menu;
+    if (worldChildren.takeRecords().length) menuKnown = false;
+    if (menuKnown) return menu = undefined;
+    menuKnown = true;
     for (let child = world.lastElementChild; child; child = child.previousElementSibling)
       if (child.classList.contains("canvas-selection-menu")) return menu = child as HTMLElement;
     return menu = undefined;
@@ -175,7 +182,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     if (!zoomGlide || !state || held) { zoomGlide = undefined; return; }
     const now = performance.now(), at = glideAt(zoomGlide, now), target = zoomGlide.target;
     if (at.done) zoomGlide = undefined; else zoomFrame = requestAnimationFrame(glideFrame);
-    Object.assign(state, zoomAround(state, at.done ? target : 2 ** at.log, anchorX, anchorY, width, height));
+    Object.assign(state, zoomAround(state, at.done ? target : clamp(2 ** at.log), anchorX, anchorY, width, height));
     gesture = true; flushBand = false;
     draw();
     if (at.done) settleAfter(now);
@@ -187,13 +194,13 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     if (wait <= 0) applyBand(state.scale);
     else { clearTimeout(settle); settle = window.setTimeout(() => { settle = 0; if (state) applyBand(state.scale); }, wait); }
   }
-  // Pressing on the board lands a running glide on its target at once, so a pan,
-  // card drag or double-click works from the zoom that was asked for.
-  function landGlide() {
+  // Pressing on the board stops a running glide where it was last painted: the
+  // browser has hit-tested the press against that board, and a pan, card drag or
+  // double-click works from it. state is the painted camera (glideFrame draws as it
+  // sets it), so nothing moves.
+  function haltGlide() {
     if (!zoomGlide || !state) return;
-    finishGlide();
-    gesture = true; flushBand = false;
-    draw();
+    stopGlide();
     settleAfter(performance.now());
   }
   const zoomNow = (scale: number) => { if (held || !state) return; stopGlide(); gesture = false; flushBand = true; zoom(scale); };
@@ -283,7 +290,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     // starts below, including on a link, so a held Space click does not follow it.
     if (!target.closest(".cm-editor, [contenteditable], input, textarea, button, a")) el.focus({ preventScroll: true });
     if (held) return;
-    landGlide();
+    haltGlide();
     if (!state || (e.button !== 1 && !(e.button === 0 && space))) return;
     e.preventDefault(); e.stopPropagation();
     cancelDrag?.();
@@ -371,6 +378,6 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     cancelGlide() { glideGen++; gliding = false; glideResize = false; },
     hold(next: boolean) { held = next; if (next) { releaseSpace(); stopGlide(); pinching = false; } },
     onHeldResize(fn: () => void) { heldResize = fn; },
-    dispose() { glideGen++; gliding = false; glideResize = false; stopGlide(); cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); clearTimeout(notify); clearTimeout(rest); size.disconnect(); events.abort(); },
+    dispose() { glideGen++; gliding = false; glideResize = false; stopGlide(); cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); clearTimeout(notify); clearTimeout(rest); size.disconnect(); worldChildren.disconnect(); events.abort(); },
   };
 }
