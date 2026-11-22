@@ -29,6 +29,8 @@ export async function measureZoom(el: HTMLElement, tab: Tab, current: () => bool
       el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: steps < 150 ? -6 : 6, clientX: x, clientY: y }));
       await new Promise(resolve => setTimeout(resolve, 8));
     }
+    // Let the last steps' zoom glide land before the viewport is restored.
+    await new Promise(resolve => setTimeout(resolve, 250));
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   } finally {
     cancelAnimationFrame(frame); observer?.disconnect(); abort.abort(); running = false;

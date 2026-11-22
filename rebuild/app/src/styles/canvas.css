@@ -11,7 +11,14 @@
   user-select: none;
   touch-action: none;
 }
-.canvas-world { position: absolute; transform-origin: 0 0; will-change: transform; }
+.canvas-world { position: absolute; transform-origin: 0 0; }
+/* While the board pans or zooms it is one composited layer, so a frame only moves a
+   bitmap. At rest nothing on it is a layer, so the engine paints text and edges at the
+   zoom they are shown at: WebKitGTK rasters a layer once and scales that bitmap, which
+   blurred a zoomed-in board. The classes are on the world, so no card is restyled. */
+.canvas-world.is-moving { will-change: transform; }
+.canvas-world.is-moving .canvas-edge-label { will-change: transform; }
+.canvas-world.is-dragging-cards .canvas-node.is-selected:not(.is-editing) { will-change: transform; }
 /* A drag cursor surface avoids restyling every Markdown child on large boards. */
 .canvas-view.is-explorer-dragging::after { content: ""; position: absolute; inset: 0; z-index: 3; cursor: grabbing; }
 .canvas-edges { position: absolute; width: 1px; height: 1px; pointer-events: none; z-index: 1; }
@@ -83,7 +90,6 @@
   transform-origin: 0 100%;
 }
 .canvas-edge-label {
-  will-change: transform;
   z-index: 1;
   position: absolute;
   transform: translate(-50%, -50%);
@@ -118,7 +124,6 @@
 .canvas-view.is-grabbable, .canvas-view.is-grabbable * { cursor: grab; }
 .canvas-view.is-panning, .canvas-view.is-panning * { cursor: grabbing; user-select: none; }
 
-.canvas-node.is-selected:not(.is-editing) { will-change: transform; }
 .canvas-node.is-selected { border-color: var(--interactive-accent); box-shadow: 0 .5px 1px .5px rgb(0 0 0 / 10%), 0 0 0 2px var(--interactive-accent); }
 .canvas-node-resizer { position: absolute; z-index: 3; }
 .canvas-node-group > .canvas-node-resizer { z-index: 1; }

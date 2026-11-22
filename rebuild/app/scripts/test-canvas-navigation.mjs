@@ -22,6 +22,8 @@ await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,
   const fit='.canvas-controls .lucide-maximize';
   const stationary=async()=>{for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,button:'left',clickCount:1,...await point(button('Zoom in'))});await sleep(60);};
   const wheel=async(dx,dy,ctrl=false,p={x:800,y:400})=>{await move(p);await send('Input.dispatchMouseEvent',{type:'mouseWheel',...p,deltaX:dx,deltaY:dy,modifiers:ctrl?2:0});await sleep(60);};
+  // R2 CZ: a Ctrl+wheel glides to its zoom; wait until the world has stopped moving.
+  const glided=()=>run(()=>new Promise(resolve=>{let last='',same=0;const frame=()=>{const t=document.querySelector('.canvas-world')?.style.transform;same=t===last?same+1:0;last=t;if(same>=3)resolve();else requestAnimationFrame(frame);};requestAnimationFrame(frame);}));
   const initial=await state();
   const data=JSON.parse(fixture), left=Math.min(...data.nodes.map(n=>n.x)),right=Math.max(...data.nodes.map(n=>n.x+n.width)),top=Math.min(...data.nodes.map(n=>n.y)),bottom=Math.max(...data.nodes.map(n=>n.y+n.height));
   check(near(initial.s,Math.min(1,initial.w/((right-left)*1.1),initial.h/((bottom-top)*1.1)))&&near(initial.x,initial.w/2-(left+right)/2*initial.s),'Opening fit uses observed 10% extent padding and actual bounds');
@@ -38,10 +40,10 @@ await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,
   await click(button('Reset zoom'));check(near((await state()).s,1),'Reset zoom is 100%');
   await click(button('Reset zoom'));const reset=await state();await wheel(60,100);const panned=await state();
   check(near(panned.x-reset.x,-55.8)&&near(panned.y-reset.y,-93),'Wheel/trackpad pans both axes at observed rate');
-  const pointer={x:850,y:450},before=await state();await wheel(0,-100,true,pointer);const after=await state();
+  const pointer={x:850,y:450},before=await state();await wheel(0,-100,true,pointer);await glided();const after=await state();
   check(near(after.s,2**(1/3))&&near((pointer.x-before.left-before.x)/before.s,(pointer.x-after.left-after.x)/after.s)&&near((pointer.y-before.top-before.y)/before.s,(pointer.y-after.top-after.y)/after.s),'Ctrl+wheel zooms around pointer at observed rate');
-  await wheel(0,-50000,true);check(near((await state()).s,2),'Maximum zoom is 2x');
-  await wheel(0,50000,true);check(near((await state()).s,1/16)&&near((await state()).grid,10),'Minimum zoom is 1/16x and grid coarsens to 10px');
+  await wheel(0,-50000,true);await glided();check(near((await state()).s,2),'Maximum zoom is 2x');
+  await wheel(0,50000,true);await glided();check(near((await state()).s,1/16)&&near((await state()).grid,10),'Minimum zoom is 1/16x and grid coarsens to 10px');
   await click(fit);const fitted=await state();check(near(fitted.s,initial.s)&&near(fitted.x,initial.x)&&near(fitted.y,initial.y),'Fit button returns to initial framing');
   for(const kind of ['space','middle']){
     const start=await state(),p={x:800,y:400};await move(p);
@@ -151,7 +153,7 @@ await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,
   await send('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false});await sleep(60);
   // Space+wheel zooms too (Canvas help: "press Space or Ctrl ... and scroll").
   const spaceBefore=await state();await send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
-  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:100,modifiers:0});await sleep(80);
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:100,modifiers:0});await sleep(80);await glided();
   await send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});const spaceAfter=await state();
   check(near(spaceAfter.s,spaceBefore.s*2**(-1/3))&&near((800-spaceBefore.left-spaceBefore.x)/spaceBefore.s,(800-spaceAfter.left-spaceAfter.x)/spaceAfter.s),'Space+wheel zooms around the pointer');
   // Card bodies scroll only on a selected or edited card.
@@ -222,9 +224,9 @@ await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,
   check(accentRing.ring.startsWith(accentRing.accent)&&Math.abs(parseFloat(accentRing.ring.match(/0px 0px 0px ([\d.]+)px/)[1])*out.scale-2)<.3,'A selected coloured card keeps a 2px accent ring on screen when zoomed out');
   await press('Escape');
   // Hysteresis: back above 55% coming in, and only once the wheel rests.
-  const wheelTo=async target=>{const s=(await look()).scale;await wheel(0,-300*Math.log2(target/s),true);};
+  const wheelTo=async(target,land=true)=>{const s=(await look()).scale;await wheel(0,-300*Math.log2(target/s),true);if(land)await glided();};
   await wheelTo(.5);await sleep(200);check((await look()).out,'Zooming in to 50% keeps titles (back above 55%)');
-  await wheelTo(.6);const early=(await look()).out;await sleep(200);
+  await wheelTo(.6,false);const early=(await look()).out;await sleep(200);
   check(early&&!(await look()).out,'Above 55% content returns once the wheel rests, not mid-gesture');
   await wheelTo(.5);await sleep(200);check(!(await look()).out,'Zooming out to 50% keeps content (titles below 45%)');
   await wheelTo(.4);await sleep(200);check((await look()).out,'Below 45% titles return');
