@@ -41,6 +41,8 @@ fn main() {
             "read_foreign_config",
             "open_note_window",
             "allow_frame_origin",
+            "allow_pdf_blob",
+            "release_pdf_blob",
         ]),
     ))
     .expect("failed to run tauri-build");

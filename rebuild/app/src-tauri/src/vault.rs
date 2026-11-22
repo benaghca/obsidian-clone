@@ -15,10 +15,82 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-/// Largest image `read_file_bytes` hands to an embed.
+/// Largest file `read_file_bytes` returns: an image, or audio, video, or PDF.
 pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
-/// The files `read_file_bytes` reads: images an embed can show.
+/// Images an embed can show. These are not sniffed.
 const IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
+/// Audio, video, and PDF. The list and the header check match `src/media.ts`.
+const MEDIA_EXTENSIONS: [&str; 14] = [
+    "mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "mp4", "m4v", "mov", "webm", "ogv",
+    "pdf",
+];
+
+fn starts_at(bytes: &[u8], text: &[u8], at: usize) -> bool {
+    bytes.get(at..at + text.len()) == Some(text)
+}
+
+/// Markup or a script, even with a media extension. A UTF-8 BOM and leading
+/// ASCII space are skipped; the magic itself is not.
+fn looks_like_active(bytes: &[u8]) -> bool {
+    let mut i = 0;
+    if bytes.len() >= 3 && bytes[..3] == [0xef, 0xbb, 0xbf] {
+        i = 3;
+    }
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r') {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return false;
+    }
+    bytes[i] == b'<' || (bytes[i] == b'#' && bytes.get(i + 1) == Some(&b'!'))
+}
+
+fn is_ftyp(bytes: &[u8]) -> bool {
+    starts_at(bytes, b"ftyp", 4)
+}
+
+fn is_quicktime(bytes: &[u8]) -> bool {
+    starts_at(bytes, b"moov", 4)
+        || starts_at(bytes, b"mdat", 4)
+        || starts_at(bytes, b"wide", 4)
+        || starts_at(bytes, b"free", 4)
+        || starts_at(bytes, b"skip", 4)
+        || starts_at(bytes, b"pnot", 4)
+}
+
+fn is_mp3(bytes: &[u8]) -> bool {
+    starts_at(bytes, b"ID3", 0) || (bytes.len() >= 2 && bytes[0] == 0xff && bytes[1] & 0xe0 == 0xe0)
+}
+
+fn is_adts(bytes: &[u8]) -> bool {
+    bytes.len() >= 2 && bytes[0] == 0xff && bytes[1] & 0xf6 == 0xf0
+}
+
+fn is_wav(bytes: &[u8]) -> bool {
+    starts_at(bytes, b"RIFF", 0) && starts_at(bytes, b"WAVE", 8)
+}
+
+fn is_ebml(bytes: &[u8]) -> bool {
+    bytes.len() >= 4 && bytes[..4] == [0x1a, 0x45, 0xdf, 0xa3]
+}
+
+/// True when `bytes` are the audio, video, or PDF that `ext` names.
+fn media_bytes_match(ext: &str, bytes: &[u8]) -> bool {
+    if looks_like_active(bytes) {
+        return false;
+    }
+    match ext {
+        "pdf" => starts_at(bytes, b"%PDF", 0),
+        "mp3" => is_mp3(bytes),
+        "wav" => is_wav(bytes),
+        "flac" => starts_at(bytes, b"fLaC", 0),
+        "ogg" | "oga" | "opus" | "ogv" => starts_at(bytes, b"OggS", 0),
+        "aac" => is_adts(bytes) || is_ftyp(bytes),
+        "m4a" | "mp4" | "m4v" | "mov" => is_ftyp(bytes) || is_quicktime(bytes),
+        "webm" => is_ebml(bytes),
+        _ => false,
+    }
+}
 
 #[derive(Clone, Copy, Default)]
 struct NoteFormat {
@@ -59,6 +131,99 @@ pub struct Vault {
     rescan: Option<Arc<()>>,
 }
 
+/// `O_NONBLOCK` for this process, from libc 0.2.191. `None` on Windows, which has no POSIX FIFO.
+/// An unknown Unix target fails the build rather than opening in a way that can block.
+fn o_nonblock() -> Option<i32> {
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "tvos",
+        target_os = "watchos",
+        target_os = "visionos",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly",
+    ))]
+    {
+        return Some(0x4);
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        #[cfg(any(
+            target_arch = "mips",
+            target_arch = "mips32r6",
+            target_arch = "mips64",
+            target_arch = "mips64r6",
+        ))]
+        {
+            return Some(128);
+        }
+        #[cfg(any(target_arch = "sparc", target_arch = "sparc64"))]
+        {
+            return Some(0x4000);
+        }
+        #[cfg(not(any(
+            target_arch = "mips",
+            target_arch = "mips32r6",
+            target_arch = "mips64",
+            target_arch = "mips64r6",
+            target_arch = "sparc",
+            target_arch = "sparc64",
+        )))]
+        {
+            return Some(0x800);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        return None;
+    }
+    #[cfg(all(
+        unix,
+        not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "visionos",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly",
+        )),
+    ))]
+    {
+        compile_error!(
+            "O_NONBLOCK is unknown for this Unix target; a blocking open can stall the vault read lock"
+        );
+    }
+}
+
+/// Open for a byte read. Unix uses this target's `O_NONBLOCK` so a FIFO returns at once.
+fn open_for_bytes(path: &Path) -> std::io::Result<fs::File> {
+    match o_nonblock() {
+        Some(flag) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                fs::OpenOptions::new()
+                    .read(true)
+                    .custom_flags(flag)
+                    .open(path)
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = flag;
+                fs::File::open(path)
+            }
+        }
+        None => fs::File::open(path),
+    }
+}
+
 impl Vault {
     pub fn open(root: PathBuf) -> Result<Self, String> {
         if !root.is_dir() {
@@ -96,16 +261,24 @@ impl Vault {
         Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
     }
 
-    /// An image's bytes, for an `![[embed]]`: the same path checks as `read_note` (inside the
-    /// vault, no `..`, no symlink out, nothing in hidden folders), image extensions only, and at
-    /// most [`IMAGE_MAX_BYTES`].
+    /// Bytes for an image embed, or for an audio, video, or PDF view. The same path checks as
+    /// `read_note` (inside the vault, no `..`, no symlink out, nothing in hidden folders), and at
+    /// most [`IMAGE_MAX_BYTES`] (the length is checked before the body is read). Images are the
+    /// image extensions only and are not sniffed. Audio, video, and PDF must also match their
+    /// header (`media_bytes_match`, the same rules as `src/media.ts`); a script or the wrong
+    /// container is `not a media file`. Unix opens with this target's `O_NONBLOCK`, then this
+    /// checks the opened descriptor: a FIFO or other non-regular file returns without blocking.
     pub fn read_file_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
         let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
-        if !ext.is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.as_str())) {
+        let image = ext.as_ref().is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.as_str()));
+        let media = ext.as_ref().is_some_and(|e| MEDIA_EXTENSIONS.contains(&e.as_str()));
+        if !image && !media {
             return Err(format!("not an image: {path}"));
         }
         let (_rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
-        let file = fs::File::open(&full).map_err(|_| format!("no such file: {path}"))?;
+        // O_NONBLOCK so a FIFO replaced onto this path cannot hold the vault read lock.
+        // The descriptor is still fstat'd below, so a swap during the open is caught.
+        let file = open_for_bytes(&full).map_err(|_| format!("no such file: {path}"))?;
         let md = file.metadata().map_err(|e| e.to_string())?;
         if !md.is_file() {
             return Err(format!("no such file: {path}"));
@@ -120,6 +293,9 @@ impl Vault {
             .map_err(|e| e.to_string())?;
         if bytes.len() as u64 > IMAGE_MAX_BYTES {
             return Err(format!("too large to show: {path}"));
+        }
+        if media && !media_bytes_match(ext.as_deref().unwrap_or(""), &bytes) {
+            return Err(format!("not a media file: {path}"));
         }
         Ok(bytes)
     }
@@ -349,7 +525,9 @@ impl Vault {
         }
     }
 
-    /// Turn a create of a path we already know about into a modify (an editor's atomic save).
+    /// Turn a create of a file we already know about into a modify (an editor's atomic save).
+    /// A create of a directory we already know about stays a create. That folder was
+    /// replaced, and a modify would not refresh the files inside it.
     pub fn normalize(&self, changes: Vec<VaultChanged>) -> Vec<VaultChanged> {
         let mut out = Vec::new();
         for change in changes {
@@ -357,10 +535,9 @@ impl Vault {
                 out.push(change);
                 continue;
             }
-            let (modified, created) = change
-                .paths
-                .into_iter()
-                .partition(|path| self.index.contains(path));
+            let (modified, created) = change.paths.into_iter().partition(|path| {
+                self.index.contains(path) && !self.index.is_dir(path)
+            });
             push_change(&mut out, ChangeKind::Create, created);
             push_change(&mut out, ChangeKind::Modify, modified);
         }
@@ -395,6 +572,15 @@ impl Vault {
                 next_id += 1;
             }
         }
+        // A create at a folder the index already has is a replacement. Its subtree
+        // is rebuilt from disk, so children the new folder lacks leave and the
+        // ones it keeps get their new stamps.
+        let replaced_dirs: Vec<&String> = changes
+            .iter()
+            .filter(|change| change.kind == ChangeKind::Create)
+            .flat_map(|change| &change.paths)
+            .filter(|path| self.index.is_dir(path))
+            .collect();
         {
             let root = &self.root;
             let mut batch = self.index.map_batch();
@@ -413,6 +599,9 @@ impl Vault {
                     }
                     ChangeKind::Create | ChangeKind::Modify => {
                         for path in &change.paths {
+                            if change.kind == ChangeKind::Create && replaced_dirs.contains(&path) {
+                                batch.remove_tree(path);
+                            }
                             batch.refresh_path(root, path);
                         }
                     }
@@ -420,6 +609,10 @@ impl Vault {
             }
         }
         self.track_ids(changes);
+        for path in &replaced_dirs {
+            self.forget_id_tree(path);
+            self.remember_id(path);
+        }
         self.track_own(changes, at.clone(), &stayed);
         // The batch above relocates every rename, including an echo of a move
         // the app already applied. Put a source that is still on disk back.
@@ -1870,6 +2063,148 @@ mod tests {
     }
 
     #[test]
+    fn read_file_bytes_reads_media_that_matches_its_header() {
+        let dir = tmp_dir("media-bytes");
+        let ok: &[(&str, &[u8])] = &[
+            ("notes/a.pdf", b"%PDF-1.4"),
+            ("clip.mp3", b"ID3\x03"),
+            ("frame.mp3", b"\xff\xfb\x90\x00"),
+            ("sound.wav", b"RIFF\x00\x00\x00\x00WAVE"),
+            ("song.ogg", b"OggS"),
+            ("song.oga", b"OggS"),
+            ("song.opus", b"OggS"),
+            ("song.flac", b"fLaC"),
+            ("voice.aac", b"\xff\xf1\x50\x80"),
+            ("voice.m4a", b"\x00\x00\x00\x18ftyp"),
+            ("movie.mp4", b"\x00\x00\x00\x18ftypisom"),
+            ("movie.MP4", b"\x00\x00\x00\x18ftypisom"),
+            ("movie.m4v", b"\x00\x00\x00\x08moov"),
+            ("movie.mov", b"\x00\x00\x00\x08mdat"),
+            ("movie.webm", &[0x1a, 0x45, 0xdf, 0xa3]),
+            ("movie.ogv", b"OggS"),
+        ];
+        for (path, bytes) in ok {
+            if let Some(parent) = Path::new(path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(dir.path.join(parent)).unwrap();
+                }
+            }
+            fs::write(dir.path.join(path), bytes).unwrap();
+        }
+        fs::write(dir.path.join("script.mp3"), b"<script>alert(1)</script>").unwrap();
+        fs::write(dir.path.join("bang.mp4"), b"#!/bin/sh\n").unwrap();
+        fs::write(dir.path.join("bom.html.pdf"), b"\xef\xbb\xbf\n  <html>").unwrap();
+        fs::write(dir.path.join("empty.pdf"), b"").unwrap();
+        fs::write(dir.path.join("wrong.mp4"), &[0x1a, 0x45, 0xdf, 0xa3]).unwrap();
+        fs::write(dir.path.join("avi.wav"), b"RIFF\x00\x00\x00\x00AVI ").unwrap();
+        fs::write(dir.path.join("Note.md"), b"%PDF").unwrap();
+        fs::create_dir(dir.path.join(".grove")).unwrap();
+        fs::write(dir.path.join(".grove").join("x.mp3"), b"ID3").unwrap();
+        fs::File::create(dir.path.join("huge.mp4"))
+            .unwrap()
+            .set_len(IMAGE_MAX_BYTES + 1)
+            .unwrap();
+        let outside = tmp_dir("media-bytes-out");
+        fs::write(outside.path.join("secret.mp3"), b"ID3").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path.join("secret.mp3"), dir.path.join("link.mp3")).unwrap();
+        let vault = Vault::open(dir.path.clone()).unwrap();
+        for (path, bytes) in ok {
+            assert_eq!(vault.read_file_bytes(path).unwrap(), *bytes, "{path}");
+        }
+        for path in ["script.mp3", "bang.mp4", "bom.html.pdf", "empty.pdf", "wrong.mp4", "avi.wav"] {
+            assert_eq!(
+                vault.read_file_bytes(path).unwrap_err(),
+                format!("not a media file: {path}")
+            );
+        }
+        assert!(vault.read_file_bytes("Note.md").unwrap_err().contains("not an image"));
+        assert!(vault.read_file_bytes("huge.mp4").unwrap_err().contains("too large"));
+        assert!(vault.read_file_bytes(".grove/x.mp3").is_err());
+        assert!(vault.read_file_bytes("pics/../../x.mp3").is_err());
+        #[cfg(unix)]
+        assert!(vault.read_file_bytes("link.mp3").is_err(), "a symlink out of the vault");
+    }
+
+    #[test]
+    fn byte_open_uses_this_targets_nonblocking_flag() {
+        let flag = o_nonblock();
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let expected = if cfg!(any(
+                target_arch = "mips",
+                target_arch = "mips32r6",
+                target_arch = "mips64",
+                target_arch = "mips64r6",
+            )) {
+                128
+            } else if cfg!(any(target_arch = "sparc", target_arch = "sparc64")) {
+                0x4000
+            } else {
+                0x800
+            };
+            assert_eq!(flag, Some(expected));
+        }
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "visionos",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly",
+        ))]
+        assert_eq!(flag, Some(0x4));
+        #[cfg(not(unix))]
+        assert_eq!(flag, None);
+    }
+
+    /// A media or image path replaced with a FIFO must return. The old note read
+    /// checked `is_file` before opening; this command holds the vault read lock.
+    #[cfg(unix)]
+    #[test]
+    fn read_file_bytes_does_not_block_on_a_fifo() {
+        let dir = tmp_dir("fifo-bytes");
+        let vault = Vault::open(dir.path.clone()).unwrap();
+        let clip = dir.path.join("clip.mp3");
+        let shot = dir.path.join("shot.png");
+        for node in [&clip, &shot] {
+            let status = std::process::Command::new("mkfifo").arg(node).status().unwrap();
+            assert!(status.success(), "mkfifo {}", node.display());
+        }
+        std::os::unix::fs::symlink(&clip, dir.path.join("link.mp3")).unwrap();
+        let expect_refused = |rel: &str, node: &Path| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let rel = rel.to_string();
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    let result = vault.read_file_bytes(&rel);
+                    let _ = tx.send(result.map(|bytes| bytes.len()));
+                });
+                match rx.recv_timeout(Duration::from_secs(2)) {
+                    Ok(Err(msg)) => assert!(
+                        msg.contains("no such file"),
+                        "{rel}: {msg}"
+                    ),
+                    Ok(Ok(n)) => panic!("{rel} was read as a file ({n} bytes)"),
+                    Err(_) => {
+                        // Unblock a stuck open so this test can finish, then fail.
+                        let _ = fs::OpenOptions::new().write(true).open(node);
+                        panic!("{rel} blocked in read_file_bytes");
+                    }
+                }
+            });
+        };
+        expect_refused("clip.mp3", &clip);
+        expect_refused("shot.png", &shot);
+        expect_refused("link.mp3", &clip);
+        fs::write(dir.path.join("ok.mp3"), b"ID3\x03").unwrap();
+        assert_eq!(vault.read_file_bytes("ok.mp3").unwrap(), b"ID3\x03");
+    }
+
+    #[test]
     fn write_file_bytes_stays_inside_the_vault() {
         let dir = tmp_dir("attach");
         let outside = tmp_dir("attach-out");
@@ -1907,7 +2242,12 @@ mod tests {
         assert_eq!(vault.read_file_bytes("pics/shot.png").unwrap(), Vec::<u8>::new());
         vault.write_file_bytes("notes/file.pdf", b"%PDF").unwrap();
         assert!(dir.path.join("notes").join("file.pdf").is_file());
-        assert!(vault.read_file_bytes("notes/file.pdf").is_err(), "not an image");
+        assert_eq!(vault.read_file_bytes("notes/file.pdf").unwrap(), b"%PDF");
+        vault.write_file_bytes("notes/run.sh", b"#!/bin/sh\n").unwrap();
+        assert!(
+            vault.read_file_bytes("notes/run.sh").unwrap_err().contains("not an image"),
+            "a script is not a media file"
+        );
         assert!(vault.write_file_bytes("../x.png", &[1]).is_err());
         assert!(vault.write_file_bytes("/etc/x.png", &[1]).is_err());
         assert!(vault.write_file_bytes(".grove/x.png", &[1]).is_err());

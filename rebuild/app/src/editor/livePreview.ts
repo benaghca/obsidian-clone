@@ -26,7 +26,8 @@ import { kept } from "../memo";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { DrawingEmbedWidget } from "../drawing/embed";
-import { BaseWidget, editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
+import { mediaKind } from "../media";
+import { BaseWidget, editingEmbed, embedSize, IMAGE_EXT, ImageWidget, MediaWidget, NoteEmbedWidget, PdfWidget } from "./embeds";
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
@@ -377,6 +378,16 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     } else if (IMAGE_EXT.test(href) && editing !== node.from) {
       const widget = new ImageWidget(resolve(href), raw, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt, node.to - node.from);
       decos.push(Decoration.replace({ widget }).range(node.from, node.to));
+    } else if (editing !== node.from) {
+      const file = href.split("#")[0];
+      const kind = mediaKind(file);
+      if (kind === "audio" || kind === "video") {
+        const widget = new MediaWidget(kind, resolve(file), raw, url.from - node.from, embedSize(alt), node.to - node.from);
+        decos.push(Decoration.replace({ widget }).range(node.from, node.to));
+      } else if (kind === "pdf") {
+        const widget = new PdfWidget(resolve(file), raw, url.from - node.from, embedSize(alt), node.to - node.from);
+        decos.push(Decoration.replace({ widget }).range(node.from, node.to));
+      }
     }
   }
 
@@ -396,6 +407,17 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
       return true;
     }
     const file = src.split("#")[0];
+    const kind = mediaKind(file);
+    if (kind === "audio" || kind === "video" || kind === "pdf") {
+      if (editing === from) return false;
+      const aliasText = alias ? doc.sliceString(alias.from, alias.to) : null;
+      const size = embedSize(aliasText ?? "");
+      const widget = kind === "pdf"
+        ? new PdfWidget(resolve(file), src, target.from - from, size, node.to - from)
+        : new MediaWidget(kind, resolve(file), src, target.from - from, size, node.to - from);
+      decos.push(Decoration.replace({ widget }).range(from, node.to));
+      return true;
+    }
     if (/\.excalidraw$/i.test(file)) {
       if (editing === from) return false;
       const aliasText = alias ? doc.sliceString(alias.from, alias.to) : null;

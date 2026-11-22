@@ -15,6 +15,7 @@
 
 import { EditorSelection, StateEffect, StateField, type Text } from "@codemirror/state";
 import type { EditorView, WidgetType } from "@codemirror/view";
+import { MEDIA_PLAY_FAIL, mediaFailText } from "../media";
 import { dragPointer, h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { fileName, noteName } from "../paths";
@@ -252,6 +253,141 @@ export class ImageWidget extends DrawnWidget {
     const unwatch = host.watch(path, load);
     onDestroy(dom, () => {
       unwatch();
+      held?.release();
+    });
+    return dom;
+  }
+}
+
+/** An audio or video embed: a player, not a note. Clicks stay on the controls. */
+export class MediaWidget extends DrawnWidget {
+  constructor(
+    readonly kind: "audio" | "video",
+    readonly path: string | null,
+    readonly src: string,
+    readonly srcAt: number,
+    readonly size: EmbedSize,
+    readonly length: number,
+  ) {
+    super();
+  }
+  ignoreEvent() {
+    return true;
+  }
+  toDOM(view: EditorView) {
+    const editor = view.state.facet(editorHost);
+    const host = editor?.embeds;
+    const { path, size, kind } = this;
+    if (!path || !host) return missingBox(`“${this.src}” could not be found.`);
+    const el = document.createElement(kind);
+    el.controls = true;
+    el.preload = "metadata";
+    if (el instanceof HTMLVideoElement) el.playsInline = true;
+    if (size.width) el.style.width = `${size.width}px`;
+    if (kind === "video" && size.height && el instanceof HTMLVideoElement) el.height = size.height;
+    const actions = editButton();
+    const dom = h("span", { class: `internal-embed media-embed is-${kind}` }, el, actions);
+    actions.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const at = view.posAtDOM(dom);
+      const from = at + this.srcAt;
+      view.dispatch({ selection: EditorSelection.range(from, from + this.src.length), effects: editEmbed.of(at) });
+      view.focus();
+    });
+    let held: ReturnType<typeof host.media> | null = null;
+    let started = false;
+    const fail = (text: string) => {
+      if (held) dom.replaceChildren(text);
+    };
+    const load = () => {
+      started = false;
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
+      held?.release();
+      if (el.parentElement !== dom) dom.replaceChildren(el, actions);
+      const mine = (held = host.media(path));
+      mine.url.then(
+        (url) => {
+          if (held !== mine) return;
+          started = true;
+          el.src = url;
+          dom.classList.add("is-loaded");
+        },
+        (err) => held === mine && fail(mediaFailText(err, kind)),
+      );
+    };
+    el.addEventListener("error", () => {
+      if (held && started) fail(MEDIA_PLAY_FAIL);
+    });
+    load();
+    const unwatch = host.watch(path, load);
+    onDestroy(dom, () => {
+      unwatch();
+      el.pause();
+      el.removeAttribute("src");
+      held?.release();
+    });
+    return dom;
+  }
+}
+
+/** A PDF embed: the same unsandboxed blob iframe as the PDF view. No iframe until the bytes succeed. */
+export class PdfWidget extends DrawnWidget {
+  constructor(
+    readonly path: string | null,
+    readonly src: string,
+    readonly srcAt: number,
+    readonly size: EmbedSize,
+    readonly length: number,
+  ) {
+    super();
+  }
+  ignoreEvent() {
+    return true;
+  }
+  toDOM(view: EditorView) {
+    const editor = view.state.facet(editorHost);
+    const host = editor?.embeds;
+    const { path, size } = this;
+    if (!path || !host) return missingBox(`“${this.src}” could not be found.`);
+    const frame = document.createElement("iframe");
+    frame.title = fileName(path);
+    if (size.width) frame.style.width = `${size.width}px`;
+    if (size.height) frame.style.height = `${size.height}px`;
+    const actions = editButton();
+    const dom = h("span", { class: "internal-embed pdf-embed" }, actions);
+    actions.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const at = view.posAtDOM(dom);
+      const from = at + this.srcAt;
+      view.dispatch({ selection: EditorSelection.range(from, from + this.src.length), effects: editEmbed.of(at) });
+      view.focus();
+    });
+    let held: ReturnType<typeof host.media> | null = null;
+    const fail = (text: string) => {
+      if (held) dom.replaceChildren(text);
+    };
+    const load = () => {
+      frame.removeAttribute("src");
+      frame.remove();
+      held?.release();
+      const mine = (held = host.media(path));
+      mine.url.then(
+        (url) => {
+          if (held !== mine) return;
+          dom.replaceChildren(frame, actions);
+          frame.src = url;
+          dom.classList.add("is-loaded");
+        },
+        (err) => held === mine && fail(mediaFailText(err, "pdf")),
+      );
+    };
+    load();
+    const unwatch = host.watch(path, load);
+    onDestroy(dom, () => {
+      unwatch();
+      frame.removeAttribute("src");
       held?.release();
     });
     return dom;

@@ -141,7 +141,7 @@ export const api = {
   lastVault: () => call<VaultInfo | null>("last_vault"),
   listFiles: () => call<FileEntry[]>("list_files"),
   readNote: (path: string) => call<string>("read_note", { path }),
-  /** An image file's bytes (vault images only, at most 20 MB), for an embed. */
+  /** Image, audio, video, or PDF bytes (at most 20 MB), for an embed or a file view. */
   readFileBytes: (path: string) => call<ArrayBuffer>("read_file_bytes", { path }),
   writeNote: (path: string, content: string) => call<void>("write_note", { path, content }),
   /**
@@ -225,6 +225,10 @@ export const api = {
    * points its frame there (editor/webEmbed.ts). The main window still can't go there.
    */
   allowFrameOrigin: (origin: string) => call<void>("allow_frame_origin", { origin }),
+  /** Register one PDF `blob:` URL so an iframe may navigate to it. Await this before setting `src`. */
+  allowPdfBlob: (url: string) => call<void>("allow_pdf_blob", { url }),
+  /** Drop one PDF blob registration. Call this after clearing the iframe `src`. */
+  releasePdfBlob: (url: string) => call<void>("release_pdf_blob", { url }),
   /** "Open in new window": the note in a window of its own (the browser preview only logs; `?note=` shows that window). */
   openNoteWindow: async (path: string) => {
     // Percent-encoded in full: the backend accepts nothing else in the URL.

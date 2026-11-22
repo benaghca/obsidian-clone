@@ -6,6 +6,7 @@ import { readProperties, splitFrontmatter } from "../editor/frontmatter";
 import { editProperty, type PropertyEdit } from "../editor/propertyEdit";
 import { linkResolver, linkSpellings, markdownURL } from "../links/internal";
 import { tagsInText } from "../shell/linksTags";
+import { mediaBytesMatch, mediaKind } from "../media";
 import { fileName, isNoteFile, noteName } from "../paths";
 import { createSearchVault } from "../shell/searchVault";
 import { sampleVault, syntheticVault } from "./sampleVault";
@@ -46,6 +47,9 @@ export function mockClipboardImageReads(): number {
 
 /** Origins registered with `allow_frame_origin`, in the form the Rust command stores (lowercase host, default port dropped). */
 const mockFrameOrigins = new Set<string>();
+
+/** PDF blob URLs registered with `allow_pdf_blob`, and how many holders each has. */
+const mockPdfBlobs = new Map<string, number>();
 
 /** The origins web embeds registered so far, in order, for browser tests. */
 export function mockAllowedFrameOrigins(): string[] {
@@ -458,16 +462,52 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       mockFrameOrigins.add(mockFrameOrigin(String(origin ?? "")));
       return null;
     },
+    allow_pdf_blob: ({ url }) => {
+      const raw = String(url ?? "");
+      let parsed: URL;
+      try {
+        parsed = new URL(raw);
+      } catch {
+        throw new Error("pdf resource must be a blob: URL");
+      }
+      if (parsed.protocol !== "blob:") throw new Error("pdf resource must be a blob: URL");
+      mockPdfBlobs.set(parsed.href, (mockPdfBlobs.get(parsed.href) ?? 0) + 1);
+      return null;
+    },
+    release_pdf_blob: ({ url }) => {
+      let href = String(url ?? "");
+      try {
+        href = new URL(href).href;
+      } catch {
+        // An unknown URL is ignored, as in the Rust command.
+      }
+      const count = mockPdfBlobs.get(href);
+      if (count === undefined) return null;
+      if (count <= 1) mockPdfBlobs.delete(href);
+      else mockPdfBlobs.set(href, count - 1);
+      return null;
+    },
     read_clipboard_image: () => {
       mockClipboardReads += 1;
       if (!mockClipboardPacked) return null;
       return new Uint8Array(mockClipboardPacked).buffer;
     },
     read_file_bytes: ({ path }) => {
-      if (!/\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(path) || path.split("/").includes("..")) throw new Error(`not an image: ${path}`);
-      const content = need(path).content;
-      const binary = isBinary(content) ? base64ToBytes(content.slice(BYTE_MARK.length)) : null;
-      return binary ?? imageBytes(content);
+      const p = String(path ?? "");
+      if (p.split("/").includes("..")) throw new Error(`not an image: ${p}`);
+      const image = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(p);
+      const kind = mediaKind(p);
+      if (!image && !kind) throw new Error(`not an image: ${p}`);
+      const content = need(p).content;
+      const binary = isBinary(content) ? new Uint8Array(base64ToBytes(content.slice(BYTE_MARK.length))) : null;
+      if (kind) {
+        const bytes = binary ?? new TextEncoder().encode(content);
+        if (bytes.byteLength > BYTE_MAX) throw new Error(`too large to show: ${p}`);
+        if (!mediaBytesMatch(p, bytes)) throw new Error(`not a media file: ${p}`);
+        return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      }
+      if (binary && binary.byteLength > BYTE_MAX) throw new Error(`too large to show: ${p}`);
+      return binary ? binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength) : imageBytes(content);
     },
     write_file_bytes: ({ path, bytes, replace }) => {
       const why = badPath(String(path ?? ""));

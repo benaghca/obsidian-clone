@@ -12,6 +12,7 @@ import { linkTargets } from "./links/internal";
 import { linkChanges } from "./links/linkDelta";
 import { listeners } from "./listeners";
 import { addEntry, dropEntries, listTokens, mapEntries } from "./listPatch";
+import { mediaKind } from "./media";
 import { isNoteFile, noteName } from "./paths";
 
 const LINK_INDEX_DELAY = 1000;
@@ -110,6 +111,13 @@ function watchList(list: { push: (...args: never[]) => unknown; pop: () => unkno
   return flag;
 }
 
+/** One disk batch's structural paths, and the media paths its direct signal already delivered. */
+export interface MediaStructureBatch {
+  id: number;
+  paths: readonly string[];
+  refreshed: readonly string[];
+}
+
 function reduceBatch(batch: { kind: string; paths: string[] }[]) {
   batchVisits = 0;
   let refresh = false;
@@ -117,25 +125,55 @@ function reduceBatch(batch: { kind: string; paths: string[] }[]) {
   const tombs = tomb();
   const touch = new Marks();
   const reload = new Marks();
+  // Audio, video, and PDF paths in this batch, including one that ends removed.
+  // Note reloads stay on `reload`. A modify is a touch, not a second signal.
+  const media: string[] = [];
+  const seenMedia = new Set<string>();
+  const markMedia = (path: string) => {
+    if (seenMedia.has(path) || !mediaKind(path)) return;
+    seenMedia.add(path);
+    media.push(path);
+  };
+  // Remove, rename, and create paths. A modify is not one of these: the file
+  // list may only be catching up to a read the holder already did.
+  const structure: string[] = [];
+  const markStructure = (path: string) => {
+    if (path) structure.push(path);
+  };
   const bury = (path: string) => {
     const node = walk(tombs, path, true);
     if (node) node.removedAt = ++seq;
   };
   for (const change of batch) {
     if (change.kind !== "modify") refresh = true;
-    if (change.kind === "remove") for (const path of change.paths) bury(path);
-    else if (change.kind === "rename") {
+    if (change.kind === "remove") {
+      for (const path of change.paths) {
+        bury(path);
+        markMedia(path);
+        markStructure(path);
+      }
+    } else if (change.kind === "rename") {
       if (change.paths[0]) bury(change.paths[0]);
-      for (const path of change.paths) reload.add(path, ++seq, tombs);
+      for (const path of change.paths) {
+        reload.add(path, ++seq, tombs);
+        markMedia(path);
+        markStructure(path);
+      }
     } else if (change.kind === "modify") {
       for (const path of change.paths) {
         const at = ++seq;
         touch.add(path, at, tombs);
         reload.add(path, at, tombs);
       }
-    } else for (const path of change.paths) reload.add(path, ++seq, tombs);
+    } else {
+      for (const path of change.paths) {
+        reload.add(path, ++seq, tombs);
+        markMedia(path);
+        markStructure(path);
+      }
+    }
   }
-  return { refresh, touch: touch.live(tombs), reload: reload.live(tombs) };
+  return { refresh, touch: touch.live(tombs), reload: reload.live(tombs), media, structure };
 }
 
 export class Vault {
@@ -215,6 +253,30 @@ export class Vault {
   private modified = listeners<[string]>();
   /** Listen for a file being modified (on disk, or saved here); returns a function that stops. */
   readonly onModified = this.modified.on;
+  private mediaPaths = listeners<[string, number]>();
+  /**
+   * An audio, video, or PDF path was created, removed, or renamed in one disk batch.
+   * Fired once per path after that batch's file list is installed, or when that read is
+   * discarded. The number is the batch. A modify uses `onModified`.
+   */
+  readonly onMediaPath = this.mediaPaths.on;
+  /** Ancestor replacements waiting for the list read that actually installs, with their batch. */
+  private pendingStructure: { id: number; paths: readonly string[] }[] = [];
+  /** Next id for a batch that removes, renames, or creates. Zero is not a batch. */
+  private nextStructure = 0;
+  /**
+   * Media paths a batch already signaled. Kept when its list read is discarded, then
+   * delivered with the structure of the read that installs, and dropped after that.
+   */
+  private refreshedByStructure = new Map<number, Set<string>>();
+  private structural = listeners<[readonly string[], readonly MediaStructureBatch[]]>();
+  /**
+   * Remove, rename, and create paths for the file list about to be installed.
+   * Fired just before that list's `files` signal. A modify is not included.
+   * A batch keeps its id across a discarded read. `refreshed` is the media paths
+   * that batch's direct signal already delivered.
+   */
+  readonly onStructure = this.structural.on;
   private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
   private refs: { files: FileEntry[]; out: NoteRef[] } | null = null;
   private targets: { files: FileEntry[]; exists: ReturnType<typeof linkTargets> } | null = null;
@@ -273,13 +335,19 @@ export class Vault {
     this.stopChanges = stop;
   }
 
-  async refreshFiles() {
+  async refreshFiles(structure?: readonly string[], structureId = 0) {
+    if (structure?.length && structureId) this.pendingStructure.push({ id: structureId, paths: structure });
     const mine = ++this.filesRequest;
     const vault = backendRoot();
     const listed = await api.listFiles();
     // The reply is the vault that was current when the read ran. Install it
-    // only if that vault is still this page's backend.
-    if (mine !== this.filesRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
+    // only if that vault is still this page's backend. A discarded reply keeps
+    // the ancestor paths, and their batch id, for the read that does install.
+    if (backendRoot() !== vault || !pageOwnsDisk()) {
+      this.clearStructure();
+      return;
+    }
+    if (mine !== this.filesRequest) return;
     // A read that began before a local edit cannot be ordered against it. The
     // snapshot may omit the edit, or it may already contain a later outside
     // change. Keep the patched list and read again after the edit. A further
@@ -292,7 +360,14 @@ export class Vault {
     this.deltas = [];
     this.confirmAgain = false;
     this.listEpoch += 1;
-    this.show(listed);
+    const pending = this.pendingStructure;
+    this.pendingStructure = [];
+    const notes: MediaStructureBatch[] = pending.map((item) => {
+      const refreshed = this.refreshedByStructure.get(item.id);
+      this.refreshedByStructure.delete(item.id);
+      return { id: item.id, paths: item.paths, refreshed: refreshed ? [...refreshed] : [] };
+    });
+    this.show(listed, notes);
   }
 
   /** Keep reading until a snapshot that started after the latest edit can install. */
@@ -358,13 +433,24 @@ export class Vault {
     return true;
   }
 
-  private show(files: FileEntry[]) {
+  private show(files: FileEntry[], structure?: readonly MediaStructureBatch[]) {
     this.pieces = listTokens(this.fileList, files);
     this.files = files;
     this.notes = this.files
       .filter((f) => !f.is_dir && isNoteFile(f.path))
       .map((f) => ({ name: noteName(f.path), path: f.path }));
+    if (structure?.length) {
+      const paths: string[] = [];
+      for (const batch of structure) for (const path of batch.paths) paths.push(path);
+      this.structural.emit(paths, structure);
+    }
     this.changed("files");
+  }
+
+  /** Drop structural batches that will never install. */
+  private clearStructure() {
+    this.pendingStructure = [];
+    this.refreshedByStructure.clear();
   }
 
   async refreshLinks() {
@@ -489,6 +575,7 @@ export class Vault {
    * A change on disk, not ours. Events that arrive before the frame, or before
    * the fallback timer, share one file-list read (when any event is not a
    * modify), one touch per path that is still here, one reload per such path,
+   * one signal per audio, video, or PDF path the batch created, removed, or renamed,
    * and one link-index read. A remove drops that path and everything inside
    * it; a later create, modify, or rename puts a path back. Events that arrive
    * while a batch is still being applied wait for it, then share the next batch.
@@ -538,6 +625,7 @@ export class Vault {
     this.linksRequest += 1;
     this.deltas = [];
     this.confirmAgain = false;
+    this.clearStructure();
     this.listEpoch += 1;
   }
 
@@ -555,10 +643,28 @@ export class Vault {
     const mine = Symbol();
     this.running = mine;
     try {
-      const { refresh, touch, reload } = reduceBatch(batch);
-      if (refresh) await this.refreshFiles();
+      const { refresh, touch, reload, media, structure } = reduceBatch(batch);
+      const structureId = structure.length ? ++this.nextStructure : 0;
+      if (refresh) await this.refreshFiles(structure, structureId);
       if (wave !== this.wave || !pageOwnsDisk()) return;
+      const touched = new Set(touch);
       for (const path of touch) this.touch(path);
+      // The list read may have been discarded. The id still names this batch when
+      // the confirmation installs, so a path delivered here is not reloaded again.
+      // A modify reloads through touch. When this batch also replaces an ancestor,
+      // that delivery belongs to the same id.
+      const waiting = structureId !== 0 && this.pendingStructure.some((item) => item.id === structureId);
+      const remember = (path: string) => {
+        if (!waiting || !mediaKind(path)) return;
+        let done = this.refreshedByStructure.get(structureId);
+        if (!done) this.refreshedByStructure.set(structureId, done = new Set());
+        done.add(path);
+      };
+      for (const path of touch) remember(path);
+      for (const path of media) if (!touched.has(path)) {
+        remember(path);
+        this.mediaPaths.emit(path, structureId);
+      }
       for (const path of reload) {
         if (wave !== this.wave || !pageOwnsDisk()) return;
         await this.reload(path);

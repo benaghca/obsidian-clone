@@ -5,9 +5,14 @@
 // note's text (its editor's, when it is open), and an image's bytes as a
 // blob: URL. Nothing is read until an embed is drawn. Notes' text is kept by
 // path until the file changes; an image's URL is revoked as soon as no embed
-// shows it, or when the file changes.
+// shows it, or when the file changes. A create, remove, or rename of an audio,
+// video, or PDF path drops that holder once per disk batch. A PDF blob is registered with the
+// navigation guard before that URL is handed out, and only when this window can
+// show the viewer; otherwise the read fails and no iframe is attached.
 
 import { api, type FileEntry } from "./api";
+import { mediaKind } from "./media";
+import type { MediaStructureBatch } from "./vault";
 import { isolateHistory } from "@codemirror/commands";
 import type { EditorView } from "@codemirror/view";
 import { embedFor } from "./editor/attachments";
@@ -20,6 +25,7 @@ import { mapEntries } from "./links/linkDelta";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { createNote } from "./fileOps";
+import { mediaMime } from "./media";
 import { fileName, isNoteFile, noteName } from "./paths";
 import { dailyNotePath, existingDailyNote, fillTemplate } from "./settings/dateFormat";
 import { settings } from "./settings/store";
@@ -174,9 +180,23 @@ async function saveAttachments(ws: Workspace, view: EditorView, files: File[], a
   return true;
 }
 
+/**
+ * `watched` is the event path, or a file inside it. A sibling is not, and neither is a
+ * name that only shares a prefix (`Dir` does not cover `Directory/clip.mp3`).
+ */
+function mediaCovered(watched: string, events: ReadonlySet<string>): boolean {
+  if (events.has(watched)) return true;
+  let slash = watched.lastIndexOf("/");
+  while (slash > 0) {
+    if (events.has(watched.slice(0, slash))) return true;
+    slash = watched.lastIndexOf("/", slash - 1);
+  }
+  return false;
+}
+
 function createEmbedHost(ws: Workspace): EmbedHost {
   const notes = new Map<string, Promise<string>>();
-  const images = new Map<string, { url: Promise<string>; holders: number }>();
+  const images = new Map<string, { url: Promise<string>; holders: number; pdf: boolean }>();
   const watchers = new Map<string, ReturnType<typeof listeners>>();
 
   const modified = (path: string) => {
@@ -184,7 +204,146 @@ function createEmbedHost(ws: Workspace): EmbedHost {
     images.delete(path); // its holders load it again, and let go of the old URL
     watchers.get(path)?.emit();
   };
-  ws.vault.onModified(modified);
+  // The list install emits "files" and then, one microtask later, the batch's
+  // modify and media-path signals. A signature change and that signal would
+  // each start a read. Remember the signature here. The signal reloads the
+  // path; a folder event that never names the file is reloaded one microtask
+  // after the signal, and only when the signal did not cover it.
+  // A modify-only batch reloads without installing a new list, so the saved
+  // signature stays old. The next list install may only be that version
+  // catching up. Skip that second reload unless this batch removes, renames,
+  // or creates a watched ancestor: a sibling note changes the folder stamp
+  // without replacing the file, and a swapped folder can keep the old stamp.
+  // Record the skip only while a watcher is active.
+  const changedByList = new Set<string>();
+  const signaled = new Set<string>();
+  const loadedAhead = new Set<string>();
+  const structural = new Set<string>();
+  /** Paths this structure install must not reload: that batch's direct signal already did. */
+  const already = new Set<string>();
+  let scheduled = false;
+  const reconcile = () => {
+    scheduled = false;
+    for (const path of changedByList) {
+      if (signaled.has(path) || !watchers.has(path)) continue;
+      modified(path);
+    }
+    changedByList.clear();
+    signaled.clear();
+  };
+  const scheduleReconcile = () => {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(() => queueMicrotask(reconcile));
+  };
+  const invalidate = (path: string) => {
+    if (mediaKind(path) && watchers.has(path)) {
+      if (scheduled) signaled.add(path);
+      else loadedAhead.add(path);
+    }
+    modified(path);
+  };
+  ws.vault.onModified(invalidate);
+  ws.vault.onMediaPath(invalidate);
+  ws.vault.onStructure((paths, batches) => {
+    structural.clear();
+    already.clear();
+    const groups: readonly MediaStructureBatch[] = batches.length
+      ? batches
+      : [{ id: 0, paths, refreshed: [] }];
+    const needs = new Set<string>();
+    const doneOnly = new Set<string>();
+    for (const batch of groups) {
+      const events = new Set<string>();
+      for (const eventPath of batch.paths) if (eventPath) events.add(eventPath);
+      const done = new Set(batch.refreshed);
+      for (const watched of watchers.keys()) {
+        if (!mediaKind(watched) || !mediaCovered(watched, events)) continue;
+        structural.add(watched);
+        if (done.has(watched)) doneOnly.add(watched);
+        else needs.add(watched);
+      }
+    }
+    // A later batch that did not refresh the file still reloads it once.
+    for (const path of needs) doneOnly.delete(path);
+    for (const path of doneOnly) already.add(path);
+  });
+  // A folder remove or rename changes the list without naming the file. Compare the
+  // paths a player or PDF is actually watching, once per file-list install.
+  const seenMedia = new Map<string, string>();
+  const mediaSig = (path: string) => {
+    const entry = ws.vault.entry(path);
+    return entry && !entry.is_dir ? `${entry.mtime_ms}:${entry.size}` : "";
+  };
+  ws.on((change) => {
+    if (change !== "files") return;
+    for (const path of [...watchers.keys()]) {
+      if (!mediaKind(path)) continue;
+      const next = mediaSig(path);
+      const prev = seenMedia.get(path);
+      seenMedia.set(path, next);
+      // A replaced ancestor can keep the file's mtime and size. That is still
+      // a new file. A batch that also names the file reloads once: the direct
+      // signal is that reload, including a modify delivered while the list
+      // read was still pending, and including when it fired before this list installed.
+      if (structural.has(path)) {
+        loadedAhead.delete(path);
+        if (already.has(path)) continue;
+        changedByList.add(path);
+        scheduleReconcile();
+        continue;
+      }
+      if (prev === undefined || prev === next) continue;
+      // The holder already read this version. A sibling note is not a new file.
+      const ahead = loadedAhead.delete(path);
+      if (ahead && next !== "") continue;
+      changedByList.add(path);
+      scheduleReconcile();
+    }
+    structural.clear();
+    already.clear();
+  });
+
+  const holdBlob = (path: string, type: string) => {
+    const pdf = type === "application/pdf";
+    const held = kept(images, path, () => ({
+      pdf,
+      holders: 0,
+      url: api.readFileBytes(path).then(async (bytes) => {
+        const url = URL.createObjectURL(new Blob([bytes], { type }));
+        if (!pdf) return url;
+        // The iframe navigates only after this returns, so the guard already lists the blob.
+        try {
+          await api.allowPdfBlob(url);
+        } catch (err) {
+          URL.revokeObjectURL(url);
+          throw err;
+        }
+        return url;
+      }),
+    }));
+    held.holders++;
+    let released = false;
+    return {
+      url: held.url,
+      release() {
+        if (released) return;
+        released = true;
+        if (--held.holders > 0) return;
+        if (images.get(path) === held) images.delete(path);
+        held.url.then(async (url) => {
+          if (held.pdf) {
+            try {
+              await api.releasePdfBlob(url);
+            } catch {
+              // The blob is still revoked below.
+            }
+          }
+          URL.revokeObjectURL(url);
+        }, () => {});
+      },
+    };
+  };
 
   return {
     resolve: (target, view) => resolveLink(target, ws.editors.pathOf(view), ws.vault.fileRefs()),
@@ -199,19 +358,10 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       });
     },
     image(path) {
-      const held = kept(images, path, () => ({ url: api.readFileBytes(path).then((bytes) => URL.createObjectURL(new Blob([bytes], { type: mime(path) }))), holders: 0 }));
-      held.holders++;
-      let released = false;
-      return {
-        url: held.url,
-        release() {
-          if (released) return;
-          released = true;
-          if (--held.holders > 0) return;
-          if (images.get(path) === held) images.delete(path);
-          held.url.then(URL.revokeObjectURL, () => {});
-        },
-      };
+      return holdBlob(path, mime(path));
+    },
+    media(path) {
+      return holdBlob(path, mediaMime(path));
     },
     async toggleTask(path, line) {
       // Through the note's editor state (loaded from disk if it isn't open), so it is saved like any edit.
@@ -223,7 +373,19 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       modified(path); // its embeds show it now, not when it is saved
     },
     watch(path, fn) {
-      return kept(watchers, path, () => listeners()).on(fn);
+      if (mediaKind(path) && !seenMedia.has(path)) seenMedia.set(path, mediaSig(path));
+      const bucket = kept(watchers, path, () => listeners());
+      const stop = bucket.on(fn);
+      let live = true;
+      return () => {
+        if (!live) return;
+        live = false;
+        stop();
+        if (bucket.size > 0) return;
+        watchers.delete(path);
+        seenMedia.delete(path);
+        loadedAhead.delete(path);
+      };
     },
     base: (parent, embed, view) => {
       const live = baseEmbeds.get();

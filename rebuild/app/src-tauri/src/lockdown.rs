@@ -6,7 +6,12 @@
 //! - every navigation (a link, a dropped URL, script setting `location`, a frame load) is checked.
 //!   The app's own origin is always allowed: `tauri://localhost`, or `http(s)://tauri.localhost` on
 //!   Windows and Android, in release builds, plus the dev server origin in dev builds. A *child* frame may also
-//!   load an `http(s)` origin the page registered with `allow_frame_origin`. The main frame may not;
+//!   load an `http(s)` origin the page registered with `allow_frame_origin`. It may also load a
+//!   `blob:` URL the page registered with `allow_pdf_blob` (a sniffed PDF), or WebKit's built-in
+//!   PDF viewer (`webkit-pdfjs-viewer://pdfjs/web/viewer.html`) when every `file` parameter is one
+//!   of those blobs. That PDF exception stays off until this window's Linux response-policy hook
+//!   is connected; that hook ignores those URLs as a main-frame document. The main frame may not
+//!   load them. Vault bytes are not page script.
 //! - every new-window request (`window.open`, `target=_blank`) is denied, registered origin or not.
 //!
 //! External links never load inside the app: the front end hands them to the system opener
@@ -21,8 +26,8 @@
 //! the window therefore also handles response policy, and ignores a main-frame document that is
 //! not the app. That is what refuses a main-frame navigation to a registered origin.
 
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
@@ -78,6 +83,157 @@ impl FrameOrigins {
             .lock()
             .unwrap_or_else(|err| err.into_inner())
             .contains(origin)
+    }
+}
+
+/// Blob URLs the page minted for a sniffed PDF. Each registration belongs to the
+/// window that created it. Closing that window drops its registrations, including
+/// one whose `allow` races the close. Another window's registrations stay.
+#[derive(Clone, Default)]
+pub struct PdfBlobs {
+    state: Arc<Mutex<PdfBlobState>>,
+}
+
+#[derive(Default)]
+struct PdfBlobState {
+    /// Windows that may still hold registrations. `close_window` removes the label.
+    live: HashSet<String>,
+    /// Parsed blob URL, then owning window, then how many holders that window has.
+    urls: HashMap<String, HashMap<String, usize>>,
+}
+
+impl PdfBlobs {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, PdfBlobState> {
+        self.state.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// This window may register blobs until [`Self::close_window`].
+    pub fn open_window(&self, window: &str) {
+        self.lock().live.insert(window.to_string());
+    }
+
+    /// Drop every registration `window` holds. A later `allow` for it does not stick.
+    pub fn close_window(&self, window: &str) {
+        let mut state = self.lock();
+        state.live.remove(window);
+        state.urls.retain(|_, holders| {
+            holders.remove(window);
+            !holders.is_empty()
+        });
+    }
+
+    /// Hold one reference for `window` when `raw` is a `blob:` URL and that window
+    /// is still open. The check and the insert share one lock with [`Self::close_window`].
+    pub fn allow(&self, window: &str, raw: &str) -> Result<(), String> {
+        let key = blob_key(raw)?;
+        let mut state = self.lock();
+        if !state.live.contains(window) {
+            return Err(PDF_VIEWER_UNAVAILABLE.into());
+        }
+        *state
+            .urls
+            .entry(key)
+            .or_default()
+            .entry(window.to_string())
+            .or_insert(0) += 1;
+        Ok(())
+    }
+
+    /// Drop one of `window`'s references. An unknown URL or window is ignored.
+    pub fn release(&self, window: &str, raw: &str) {
+        let Ok(key) = blob_key(raw) else {
+            return;
+        };
+        let mut state = self.lock();
+        let Some(holders) = state.urls.get_mut(&key) else {
+            return;
+        };
+        let Some(count) = holders.get_mut(window) else {
+            return;
+        };
+        if *count <= 1 {
+            holders.remove(window);
+            if holders.is_empty() {
+                state.urls.remove(&key);
+            }
+        } else {
+            *count -= 1;
+        }
+    }
+
+    /// Whether `window` still holds `url`.
+    pub fn holds(&self, window: &str, url: &Url) -> bool {
+        if url.scheme() != "blob" {
+            return false;
+        }
+        self.lock()
+            .urls
+            .get(url.as_str())
+            .and_then(|holders| holders.get(window))
+            .is_some_and(|count| *count > 0)
+    }
+}
+
+fn blob_key(raw: &str) -> Result<String, String> {
+    const ERR: &str = "pdf resource must be a blob: URL";
+    if raw.is_empty() || raw.chars().any(char::is_whitespace) {
+        return Err(ERR.into());
+    }
+    let url = Url::parse(raw).map_err(|_| ERR.to_string())?;
+    if url.scheme() != "blob" {
+        return Err(ERR.into());
+    }
+    Ok(url.as_str().to_string())
+}
+
+/// Shown when this window cannot navigate a PDF frame. The page uses it instead of a blank iframe.
+pub const PDF_VIEWER_UNAVAILABLE: &str = "PDF viewer is not available in this window";
+
+/// One flag per window. It starts false and becomes true only after that window's Linux
+/// response-policy hook is connected. A missing window is not ready.
+#[derive(Clone, Default)]
+pub struct PdfFrameFlags {
+    flags: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+}
+
+impl PdfFrameFlags {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&self, label: &str, flag: Arc<AtomicBool>) {
+        self.flags
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .insert(label.to_string(), flag);
+    }
+
+    pub fn remove(&self, label: &str) {
+        self.flags
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .remove(label);
+    }
+
+    pub fn enabled(&self, label: &str) -> bool {
+        self.flags
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .get(label)
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+    }
+
+    /// Register `url` only when this window's viewer hook is connected. Otherwise the blob
+    /// is not recorded, and the caller shows a fallback instead of navigating.
+    pub fn allow_blob(&self, label: &str, pdf: &PdfBlobs, url: &str) -> Result<(), String> {
+        if !self.enabled(label) {
+            return Err(PDF_VIEWER_UNAVAILABLE.into());
+        }
+        pdf.allow(label, url)
     }
 }
 
@@ -177,12 +333,29 @@ fn build_window(
         None
     };
     let frames = app.state::<FrameOrigins>().inner().clone();
+    let pdf = app.state::<PdfBlobs>().inner().clone();
+    let pdf_nav = pdf.clone();
+    let nav_label = label.to_string();
     let guard_dev = dev_url.clone();
+    // This window may allow a PDF frame only after its own main-frame hook is connected.
+    let pdf_frames = Arc::new(AtomicBool::new(false));
+    let pdf_frames_nav = Arc::clone(&pdf_frames);
+    let frame_flags = app.state::<PdfFrameFlags>().inner().clone();
+    frame_flags.insert(label, Arc::clone(&pdf_frames));
     let window = WebviewWindowBuilder::from_config(app, &config)?
         .on_navigation(move |url| {
             // Unknown: this callback cannot tell the main frame from a subframe. The response
-            // policy hook below refuses a main-frame document that is not the app.
-            let allowed = navigation_allowed(url, dev_url.as_ref(), &frames, NavFrame::Unknown);
+            // policy hook below refuses a main-frame document that is not the app. The PDF
+            // exception stays off until that hook is connected on this window.
+            let allowed = navigation_allowed(
+                url,
+                dev_url.as_ref(),
+                &frames,
+                &pdf_nav,
+                pdf_frames_nav.load(Ordering::Acquire),
+                NavFrame::Unknown,
+                &nav_label,
+            );
             if !allowed {
                 eprintln!("grove: blocked navigation to {url}");
             }
@@ -193,7 +366,17 @@ fn build_window(
             NewWindowResponse::Deny
         })
         .build()?;
-    install_main_frame_guard(&window, guard_dev);
+    pdf.open_window(label);
+    let closed = frame_flags.clone();
+    let closed_pdf = pdf.clone();
+    let closed_label = label.to_string();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            closed.remove(&closed_label);
+            closed_pdf.close_window(&closed_label);
+        }
+    });
+    install_main_frame_guard(&window, guard_dev, pdf_frames);
     enable_spellchecker(&window);
     // Off unless GROVE_FRAME_PACING=compositor (piece HZ, fix B).
     #[cfg(target_os = "linux")]
@@ -204,7 +387,11 @@ fn build_window(
 /// Ignore a main-frame document that is not Grove. Subframe documents and subresources are left
 /// to the navigation callback, which allows only registered http(s) origins.
 #[cfg(target_os = "linux")]
-fn install_main_frame_guard(window: &tauri::WebviewWindow, dev_url: Option<Url>) {
+fn install_main_frame_guard(
+    window: &tauri::WebviewWindow,
+    dev_url: Option<Url>,
+    pdf_frames: Arc<AtomicBool>,
+) {
     let _ = window.with_webview(move |webview| {
         use webkit2gtk::glib::prelude::Cast;
         use webkit2gtk::{
@@ -236,11 +423,18 @@ fn install_main_frame_guard(window: &tauri::WebviewWindow, dev_url: Option<Url>)
                 decision.ignore();
                 true
             });
+        // The handler is connected. Until this runs, blob and viewer navigations stay refused.
+        pdf_frames.store(true, Ordering::Release);
     });
 }
 
 #[cfg(not(target_os = "linux"))]
-fn install_main_frame_guard(_window: &tauri::WebviewWindow, _dev_url: Option<Url>) {}
+fn install_main_frame_guard(
+    _window: &tauri::WebviewWindow,
+    _dev_url: Option<Url>,
+    _pdf_frames: Arc<AtomicBool>,
+) {
+}
 
 /// WebKitGTK checks spelling with Enchant and the dictionaries installed on the machine; it never
 /// sends text anywhere. wry leaves it off, so `spellcheck="true"` (Settings → Editor → Spellcheck)
@@ -293,16 +487,60 @@ pub fn main_frame_document_allowed(url: &Url, dev_url: Option<&Url>) -> bool {
     is_app_url(url, dev_url)
 }
 
+/// WebKit's built-in PDF viewer, and only when every `file` is a blob the page registered.
+fn is_pdf_viewer_url(url: &Url, pdf: &PdfBlobs, holder: &str) -> bool {
+    if url.scheme() != "webkit-pdfjs-viewer"
+        || url.host_str() != Some("pdfjs")
+        || url.path() != "/web/viewer.html"
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return false;
+    }
+    let mut saw_file = false;
+    for (key, value) in url.query_pairs() {
+        if key != "file" {
+            continue;
+        }
+        saw_file = true;
+        let Ok(file) = Url::parse(&value) else {
+            return false;
+        };
+        if !pdf.holds(holder, &file) {
+            return false;
+        }
+    }
+    saw_file
+}
+
+/// A registered PDF blob, or the viewer opened on one. `pdf_frames_enabled` is this window's
+/// main-frame hook, not a guess from the target OS.
+fn pdf_frame_url(url: &Url, pdf: &PdfBlobs, pdf_frames_enabled: bool, holder: &str) -> bool {
+    if !pdf_frames_enabled {
+        return false;
+    }
+    if url.scheme() == "blob" {
+        return pdf.holds(holder, url);
+    }
+    is_pdf_viewer_url(url, pdf, holder)
+}
+
 /// Whether a navigation may proceed.
 ///
 /// The main frame stays on the app. A child frame, and a navigation whose frame wry cannot name,
-/// may also go to a registered http(s) origin. `file:`, `javascript:`, and anything unregistered
-/// are refused in every frame. New windows are not decided here; the builder denies all of them.
+/// may also go to a registered http(s) origin. A PDF blob the page registered, and WebKit's PDF
+/// viewer opened on that blob, are allowed only when `pdf_frames_enabled` is set, which is after
+/// this window's Linux response-policy hook is connected. `file:`, `javascript:`, `data:`, and
+/// anything unregistered are refused in every frame. New windows are not decided here; the
+/// builder denies all of them.
 pub fn navigation_allowed(
     url: &Url,
     dev_url: Option<&Url>,
     frames: &FrameOrigins,
+    pdf: &PdfBlobs,
+    pdf_frames_enabled: bool,
     place: NavFrame,
+    holder: &str,
 ) -> bool {
     if is_app_url(url, dev_url) {
         return true;
@@ -310,7 +548,8 @@ pub fn navigation_allowed(
     match place {
         NavFrame::Main => false,
         NavFrame::Child | NavFrame::Unknown => {
-            http_origin(url).is_some_and(|origin| frames.contains(&origin))
+            pdf_frame_url(url, pdf, pdf_frames_enabled, holder)
+                || http_origin(url).is_some_and(|origin| frames.contains(&origin))
         }
     }
 }
@@ -375,6 +614,13 @@ pub fn capabilities_grant_local_ipc_only() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// The calls below pass no PDF blobs and leave the main-frame hook off.
+    fn nav(url: &Url, dev: Option<&Url>, frames: &FrameOrigins, place: NavFrame) -> bool {
+        super::navigation_allowed(url, dev, frames, &PdfBlobs::new(), false, place, "")
+    }
 
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()
@@ -442,13 +688,9 @@ mod tests {
         assert_eq!(main_frame_document_allowed(&secure, Some(&dev)), app_here);
         let frames = FrameOrigins::new();
         for place in [NavFrame::Main, NavFrame::Child, NavFrame::Unknown] {
+            assert_eq!(nav(&local, None, &frames, place), app_here, "{place:?}");
             assert_eq!(
-                navigation_allowed(&local, None, &frames, place),
-                app_here,
-                "{place:?}"
-            );
-            assert_eq!(
-                navigation_allowed(&secure, Some(&dev), &frames, place),
+                nav(&secure, Some(&dev), &frames, place),
                 app_here,
                 "{place:?}"
             );
@@ -482,6 +724,26 @@ mod tests {
                 policy["media-src"].as_str(),
                 Some("'self' blob:"),
                 "{name} media-src"
+            );
+            assert_eq!(
+                policy["frame-src"].as_str(),
+                Some("https: http: blob: webkit-pdfjs-viewer:"),
+                "{name} frame-src"
+            );
+            assert_eq!(
+                policy["object-src"].as_str(),
+                Some("'none'"),
+                "{name} object-src"
+            );
+            assert_eq!(
+                policy["child-src"].as_str(),
+                Some("'none'"),
+                "{name} child-src"
+            );
+            assert_eq!(
+                policy["script-src"].as_str(),
+                Some("'self'"),
+                "{name} script-src"
             );
             let flat = policy.to_string();
             assert!(
@@ -556,13 +818,10 @@ mod tests {
         let script = url("javascript:alert(1)");
 
         for place in [NavFrame::Main, NavFrame::Child, NavFrame::Unknown] {
-            assert!(navigation_allowed(&app, None, &frames, place), "{place:?}");
+            assert!(nav(&app, None, &frames, place), "{place:?}");
+            assert!(nav(&url("about:blank"), None, &frames, place), "{place:?}");
             assert!(
-                navigation_allowed(&url("about:blank"), None, &frames, place),
-                "{place:?}"
-            );
-            assert!(
-                navigation_allowed(
+                nav(
                     &url("http://localhost:1420/src/main.ts"),
                     Some(&dev),
                     &frames,
@@ -572,28 +831,23 @@ mod tests {
             );
         }
 
-        assert!(navigation_allowed(
-            &registered_page,
-            None,
-            &frames,
-            NavFrame::Child
-        ));
-        assert!(!navigation_allowed(&other, None, &frames, NavFrame::Child));
-        assert!(!navigation_allowed(&file, None, &frames, NavFrame::Child));
-        assert!(!navigation_allowed(&script, None, &frames, NavFrame::Child));
-        assert!(!navigation_allowed(
+        assert!(nav(&registered_page, None, &frames, NavFrame::Child));
+        assert!(!nav(&other, None, &frames, NavFrame::Child));
+        assert!(!nav(&file, None, &frames, NavFrame::Child));
+        assert!(!nav(&script, None, &frames, NavFrame::Child));
+        assert!(!nav(
             &url("https://www.example.com/"),
             None,
             &frames,
             NavFrame::Child
         ));
-        assert!(!navigation_allowed(
+        assert!(!nav(
             &url("http://example.com/"),
             None,
             &frames,
             NavFrame::Child
         ));
-        assert!(!navigation_allowed(
+        assert!(!nav(
             &url("https://example.com:8443/"),
             None,
             &frames,
@@ -601,24 +855,14 @@ mod tests {
         ));
 
         // The caller knows this is the main frame, so a registered origin is refused.
-        assert!(!navigation_allowed(
-            &registered_page,
-            None,
-            &frames,
-            NavFrame::Main
-        ));
+        assert!(!nav(&registered_page, None, &frames, NavFrame::Main));
         assert!(!main_frame_document_allowed(&registered_page, None));
         assert!(main_frame_document_allowed(&app, None));
 
         // wry cannot tell. Unknown is what on_navigation passes, so the frame load is allowed
         // and the Linux response-policy hook is what refuses the main-frame document.
         assert!(!WRY_ON_NAVIGATION_TELLS_FRAME);
-        assert!(navigation_allowed(
-            &registered_page,
-            None,
-            &frames,
-            NavFrame::Unknown
-        ));
+        assert!(nav(&registered_page, None, &frames, NavFrame::Unknown));
         if main_frame_document_is_distinguishable() {
             assert!(!main_frame_document_allowed(&registered_page, None));
             assert!(!main_frame_document_allowed(&file, None));
@@ -626,11 +870,269 @@ mod tests {
         }
 
         let bare = FrameOrigins::new();
+        assert!(!nav(&registered_page, None, &bare, NavFrame::Child));
+
+        // An unregistered blob is not a PDF frame, and the hook is off in `nav`.
+        // on_navigation passes Unknown, so that classification has to refuse it too.
+        let blob = url("blob:https://example.com/550e8400-e29b-41d4-a716-446655440000");
+        let viewer = url(
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=blob%3Ahttps%3A%2F%2Fexample.com%2F550e8400-e29b-41d4-a716-446655440000",
+        );
+        for place in [NavFrame::Child, NavFrame::Unknown, NavFrame::Main] {
+            assert!(!nav(&blob, None, &bare, place), "{place:?}");
+            assert!(!nav(&viewer, None, &bare, place), "{place:?}");
+        }
+        assert!(!main_frame_document_allowed(&blob, None));
+        assert!(!main_frame_document_allowed(&viewer, None));
+        for refused in [
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html",
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=https://evil.test/a.pdf",
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=javascript:alert(1)",
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=file:///etc/passwd",
+            "webkit-pdfjs-viewer://pdfjs/extras/content-script.js?file=blob:https://example.com/x",
+            "webkit-pdfjs-viewer://evil/web/viewer.html?file=blob:https://example.com/x",
+            "webkit-pdfjs-viewer://user@pdfjs/web/viewer.html?file=blob:https://example.com/x",
+            "data:application/pdf,JVBERi0=",
+            "javascript:alert(1)",
+        ] {
+            assert!(
+                !nav(&url(refused), None, &bare, NavFrame::Child),
+                "{refused} was allowed"
+            );
+            assert!(
+                !nav(&url(refused), None, &bare, NavFrame::Unknown),
+                "{refused} was allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn pdf_frames_follow_registered_blobs_and_the_top_level_deny() {
+        let raw = "blob:https://example.com/550e8400-e29b-41d4-a716-446655440000";
+        assert_eq!(url(raw).as_str(), raw);
+        for sample in [
+            "blob:http://localhost:1420/8b0b0b0b-1111-2222-3333-444444444444",
+            "blob:tauri://localhost/8b0b0b0b-1111-2222-3333-444444444444",
+        ] {
+            assert_eq!(url(sample).as_str(), sample, "{sample}");
+            assert_eq!(url(sample).scheme(), "blob");
+        }
+        let blob = url(raw);
+        let other = url("blob:https://example.com/not-a-pdf");
+        let viewer = url(
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=blob%3Ahttps%3A%2F%2Fexample.com%2F550e8400-e29b-41d4-a716-446655440000",
+        );
+        let viewer_other = url(
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=blob%3Ahttps%3A%2F%2Fexample.com%2Fnot-a-pdf",
+        );
+        let frames = FrameOrigins::new();
+        let pdf = PdfBlobs::new();
+        pdf.open_window("main");
+        pdf.allow("main", raw).unwrap();
+        assert!(pdf.allow("main", "https://example.com/a.pdf").is_err());
+        assert!(pdf.allow("main", "javascript:alert(1)").is_err());
+        assert!(pdf.allow("main", "file:///etc/passwd").is_err());
+        assert!(pdf.allow("main", "blob:https://example.com/x y").is_err());
+
+        // The runtime passes Unknown. A unit test that names Main does not prove the hook.
+        assert!(!WRY_ON_NAVIGATION_TELLS_FRAME);
+        for place in [NavFrame::Child, NavFrame::Unknown, NavFrame::Main] {
+            assert!(
+                !navigation_allowed(&blob, None, &frames, &pdf, false, place, "main"),
+                "{place:?} allowed a pdf blob before the top-level deny"
+            );
+            assert!(
+                !navigation_allowed(&viewer, None, &frames, &pdf, false, place, "main"),
+                "{place:?} allowed the viewer before the top-level deny"
+            );
+        }
+        for place in [NavFrame::Child, NavFrame::Unknown] {
+            assert!(
+                navigation_allowed(&blob, None, &frames, &pdf, true, place, "main"),
+                "{place:?}"
+            );
+            assert!(
+                navigation_allowed(&viewer, None, &frames, &pdf, true, place, "main"),
+                "{place:?}"
+            );
+            assert!(
+                !navigation_allowed(&other, None, &frames, &pdf, true, place, "main"),
+                "{place:?} allowed an unregistered blob"
+            );
+            assert!(
+                !navigation_allowed(&viewer_other, None, &frames, &pdf, true, place, "main"),
+                "{place:?} allowed a viewer for an unregistered blob"
+            );
+        }
         assert!(!navigation_allowed(
-            &registered_page,
+            &blob,
             None,
-            &bare,
-            NavFrame::Child
+            &frames,
+            &pdf,
+            true,
+            NavFrame::Main,
+            "main"
+        ));
+        assert!(!navigation_allowed(
+            &viewer,
+            None,
+            &frames,
+            &pdf,
+            true,
+            NavFrame::Main,
+            "main"
+        ));
+        assert!(!main_frame_document_allowed(&blob, None));
+        assert!(!main_frame_document_allowed(&viewer, None));
+        for refused in [
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=javascript:alert(1)",
+            "webkit-pdfjs-viewer://pdfjs/extras/content-script.js?file=blob:https://example.com/550e8400-e29b-41d4-a716-446655440000",
+            "data:application/pdf,JVBERi0=",
+        ] {
+            assert!(
+                !navigation_allowed(
+                    &url(refused),
+                    None,
+                    &frames,
+                    &pdf,
+                    true,
+                    NavFrame::Unknown,
+                    "main"
+                ),
+                "{refused} was allowed"
+            );
+        }
+
+        // A second holder on this window keeps the blob. The last release drops it.
+        // Another window's release does not.
+        pdf.open_window("note-1");
+        pdf.allow("note-1", raw).unwrap();
+        pdf.allow("main", raw).unwrap();
+        pdf.release("note-1", raw);
+        assert!(pdf.holds("main", &blob));
+        assert!(!pdf.holds("note-1", &blob));
+        pdf.release("main", raw);
+        assert!(navigation_allowed(
+            &blob,
+            None,
+            &frames,
+            &pdf,
+            true,
+            NavFrame::Unknown,
+            "main"
+        ));
+        pdf.release("main", raw);
+        assert!(!navigation_allowed(
+            &blob,
+            None,
+            &frames,
+            &pdf,
+            true,
+            NavFrame::Unknown,
+            "main"
+        ));
+        pdf.release("main", raw);
+
+        let web = registered("https://example.com");
+        let page = url("https://example.com/watch");
+        assert!(navigation_allowed(
+            &page,
+            None,
+            &web,
+            &pdf,
+            false,
+            NavFrame::Unknown,
+            "main"
+        ));
+        assert!(!navigation_allowed(
+            &page,
+            None,
+            &web,
+            &pdf,
+            false,
+            NavFrame::Main,
+            "main"
+        ));
+    }
+
+    #[test]
+    fn a_window_without_the_viewer_hook_does_not_register_a_pdf_blob() {
+        let raw = "blob:https://example.com/550e8400-e29b-41d4-a716-446655440000";
+        let flags = PdfFrameFlags::new();
+        let main = Arc::new(AtomicBool::new(false));
+        let note = Arc::new(AtomicBool::new(false));
+        flags.insert("main", Arc::clone(&main));
+        flags.insert("note-1", Arc::clone(&note));
+        assert!(!flags.enabled("main"));
+        assert!(!flags.enabled("missing"));
+        let pdf = PdfBlobs::new();
+        pdf.open_window("main");
+        pdf.open_window("note-1");
+        let err = flags.allow_blob("main", &pdf, raw).unwrap_err();
+        assert_eq!(err, PDF_VIEWER_UNAVAILABLE);
+        assert!(!pdf.holds("main", &url(raw)));
+        // Another window's hook does not make this one ready.
+        note.store(true, Ordering::Release);
+        assert!(flags.allow_blob("main", &pdf, raw).is_err());
+        assert!(!pdf.holds("main", &url(raw)));
+        main.store(true, Ordering::Release);
+        flags.allow_blob("main", &pdf, raw).unwrap();
+        assert!(pdf.holds("main", &url(raw)));
+        assert!(flags.enabled("note-1"));
+        // Destroy drops the flag and this window's registrations. The other window stays.
+        flags.remove("main");
+        pdf.close_window("main");
+        assert!(!flags.enabled("main"));
+        assert!(flags.enabled("note-1"));
+        assert!(!pdf.holds("main", &url(raw)));
+        assert!(flags.allow_blob("main", &pdf, raw).is_err());
+        assert!(!pdf.holds("main", &url(raw)));
+    }
+
+    #[test]
+    fn closing_a_window_drops_its_pdf_blobs_including_one_racing_the_close() {
+        let raw = "blob:https://example.com/550e8400-e29b-41d4-a716-446655440000";
+        let blob = url(raw);
+        let pdf = PdfBlobs::new();
+        pdf.open_window("main");
+        pdf.open_window("note-1");
+        pdf.allow("main", raw).unwrap();
+        pdf.allow("note-1", raw).unwrap();
+        let running = Arc::new(AtomicBool::new(true));
+        let spin = Arc::clone(&running);
+        let racing = pdf.clone();
+        let worker = std::thread::spawn(move || {
+            while spin.load(Ordering::Relaxed) {
+                let _ = racing.allow("note-1", raw);
+            }
+            let _ = racing.allow("note-1", raw);
+        });
+        std::thread::yield_now();
+        pdf.close_window("note-1");
+        running.store(false, Ordering::Relaxed);
+        worker.join().unwrap();
+        assert!(!pdf.holds("note-1", &blob));
+        assert!(pdf.holds("main", &blob));
+        assert!(pdf.allow("note-1", raw).is_err());
+        assert!(!pdf.holds("note-1", &blob));
+        let frames = FrameOrigins::new();
+        assert!(navigation_allowed(
+            &blob,
+            None,
+            &frames,
+            &pdf,
+            true,
+            NavFrame::Unknown,
+            "main"
+        ));
+        assert!(!navigation_allowed(
+            &blob,
+            None,
+            &frames,
+            &pdf,
+            true,
+            NavFrame::Unknown,
+            "note-1"
         ));
     }
 

@@ -121,6 +121,8 @@ pub fn run() {
                 search_gen: search_scan::SearchSlots::default(),
             });
             app.manage(lockdown::FrameOrigins::new());
+            app.manage(lockdown::PdfBlobs::new());
+            app.manage(lockdown::PdfFrameFlags::new());
             let handle: AppHandle = app.handle().clone();
             std::thread::Builder::new()
                 .name("vault-watch".into())
@@ -136,7 +138,7 @@ pub fn run() {
             create_note, create_folder, rename_path, delete_path, search, search_notes,
             search_lines, search_match, link_index, link_changes, backlinks, link_sources, frontmatter,
             properties, tags, read_config, write_config, read_foreign_config,
-            open_note_window, allow_frame_origin,
+            open_note_window, allow_frame_origin, allow_pdf_blob, release_pdf_blob,
         ]))
         .build(tauri::generate_context!())
         .expect("error while building grove")
@@ -416,6 +418,30 @@ async fn open_note_window(app: AppHandle, note: String) -> Result<(), String> {
 #[tauri::command(async)]
 fn allow_frame_origin(origins: State<'_, lockdown::FrameOrigins>, origin: String) -> Result<(), String> {
     origins.allow(&origin)
+}
+
+/// Hold one reference to a PDF `blob:` URL so an embedded frame may navigate to it.
+/// Refuses when this window's Linux response-policy hook is not connected, without
+/// recording the blob. The main frame may not navigate there either (`lockdown`).
+#[tauri::command(async)]
+fn allow_pdf_blob<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    frames: State<'_, lockdown::PdfFrameFlags>,
+    pdf: State<'_, lockdown::PdfBlobs>,
+    url: String,
+) -> Result<(), String> {
+    frames.allow_blob(window.label(), &pdf, &url)
+}
+
+/// Drop one reference this window holds from [`allow_pdf_blob`]. The last one removes the URL.
+#[tauri::command(async)]
+fn release_pdf_blob<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    pdf: State<'_, lockdown::PdfBlobs>,
+    url: String,
+) -> Result<(), String> {
+    pdf.release(window.label(), &url);
+    Ok(())
 }
 
 #[tauri::command(async)]

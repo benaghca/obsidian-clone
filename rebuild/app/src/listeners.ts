@@ -11,5 +11,8 @@ export function listeners<A extends unknown[] = []>() {
     emit(...args: A) {
       for (const fn of fns) fn(...args);
     },
+    get size() {
+      return fns.size;
+    },
   };
 }
