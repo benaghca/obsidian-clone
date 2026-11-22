@@ -377,3 +377,32 @@ it("does not publish a note read that lost a disk change while it was in flight"
   await reloading;
   expect((await loading)?.doc.toString()).toBe("fresh");
 });
+
+it("tells link consumers which notes a links refresh changed (none for a prose save)", async () => {
+  const { linkReader } = await import("./links/linkDelta");
+  let version = 0;
+  let pending: Record<string, { outgoing?: string[] }> = {};
+  const read = linkReader(async (id, since) => {
+    if (id === null || since === null) return { id: 1, version, since: null, full: { outgoing: { "a.md": ["b.md"] }, markdown: {}, unresolved: {} }, changed: {} };
+    const changed = pending;
+    pending = {};
+    return { id: 1, version: ++version, since, full: null, changed };
+  });
+  vi.mocked(api.linkIndex).mockImplementation(read);
+  const changed = vi.fn(), vault = new Vault(changed, async () => {});
+  await vault.refreshLinks();
+  expect(vault.linkTouch).toBeNull();
+  // A save of prose: the backend lists the note (it was re-resolved), its entry is the same.
+  pending = { "a.md": { outgoing: ["b.md"] } };
+  await vault.refreshLinks();
+  expect(vault.linkTouch).toEqual(new Set());
+  pending = { "a.md": { outgoing: ["b.md", "c.md"] }, "c.md": { outgoing: ["a.md"] } };
+  await vault.refreshLinks();
+  expect(vault.linkTouch).toEqual(new Set(["a.md", "c.md"]));
+  expect(vault.links.outgoing).toEqual({ "a.md": ["b.md", "c.md"], "c.md": ["a.md"] });
+  expect(changed.mock.calls).toEqual([["links"], ["links"], ["links"]]);
+  // A whole index from elsewhere (a test's stub, another reader): unknown.
+  vi.mocked(api.linkIndex).mockResolvedValueOnce({ outgoing: {} });
+  await vault.refreshLinks();
+  expect(vault.linkTouch).toBeNull();
+});

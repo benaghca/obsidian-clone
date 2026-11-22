@@ -182,3 +182,82 @@ it("reads a moved property's preserved key spelling consistently with CAS",()=>{
  const row:Row={file:{path:'A.md',name:'A.md',is_dir:false,size:0,mtime_ms:0,ctime_ms:0},props:[{key:'Status',type:'text',value:'doing',line:0,count:1}],tags:[],hasLink:()=>false};
  expect(model.context(row).get('status')).toBe('doing');expect(model.select([row])[0].context.get('note.STATUS')).toBe('doing');
 });
+
+// Review 3: `select` runs in steps (`selectWork`), its sort a stable merge sort in steps.
+it("selects in steps, in the order the one-task sort gave", async () => {
+  const { compareNames, noteName } = await import("../paths");
+  let x = 7;
+  const r = (n: number) => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) % n; };
+  const statuses = ["open", "Open", "done", "later", "", "b10", "b9"];
+  const rows: Row[] = Array.from({ length: 3000 }, (_, i) => {
+    const props: Row["props"] = [];
+    if (r(5)) props.push({ key: "priority", type: "number", value: String(r(9) - 4), line: 0, count: 1 });
+    const status = statuses[r(statuses.length)]!;
+    if (status) props.push({ key: "status", type: "text", value: status, line: 0, count: 1 });
+    const name = `n${r(400)}`;
+    return { file: { path: `S/${i % 7}/${name}.md`, name, is_dir: false, mtime_ms: 1, ctime_ms: 1, size: 1 }, props, tags: [], hasLink: () => false };
+  });
+  const model = baseModel(`filters: '!(priority == 0)'\nviews:\n  - sort:\n      - property: priority\n        direction: DESC\n      - property: status\n`);
+  const work = model.selectWork(rows, true);
+  let pauses = 0, step = work.next();
+  for (; !step.done; step = work.next()) pauses++;
+  expect(pauses).toBeGreaterThan(3000 / 256 + 30);
+  // The one-task select, as it was: the filter, then a native sort of the same keys.
+  const value = (row: Row, key: string) => { const v = row.props.find((p) => p.key === key)?.value; return v === undefined ? undefined : String(v); };
+  const oracle = rows.filter((row) => Number(value(row, "priority") ?? NaN) !== 0).sort((a, b) => {
+    const pa = value(a, "priority"), pb = value(b, "priority");
+    if ((pa === undefined) !== (pb === undefined)) return pa === undefined ? 1 : -1;
+    if (pa !== undefined && pb !== undefined && Number(pa) !== Number(pb)) return (Number(pa) - Number(pb)) * -1;
+    const sa = value(a, "status"), sb = value(b, "status");
+    if ((sa === undefined) !== (sb === undefined)) return sa === undefined ? 1 : -1;
+    const diff = sa !== undefined && sb !== undefined ? compareNames(sa, sb) : 0;
+    if (diff) return diff;
+    return compareNames(noteName(a.file.path), noteName(b.file.path)) || compareNames(a.file.path, b.file.path);
+  });
+  expect(step.value.map((e) => e.row.file.path)).toEqual(oracle.map((row) => row.file.path));
+  expect(model.select(rows, true).map((e) => e.row.file.path)).toEqual(oracle.map((row) => row.file.path));
+});
+
+// Review 4: a sort column that mixes kinds compares some pairs as numbers and others as text,
+// which can go round in a cycle; there the rows keep the order `Array.prototype.sort` gave,
+// on first paint (`select`) and in a refresh in steps (`selectWork`), and so does the limit.
+it("keeps the native order for a sort column that mixes numbers and text", async () => {
+  const { compareNames, noteName } = await import("../paths");
+  const { parseDate } = await import("./dates");
+  const typed = (path: string, value: string, type: "number" | "text"): Row => ({ file: { path, name: noteName(path), is_dir: false, mtime_ms: 1, ctime_ms: 1, size: 1 }, props: [{ key: "v", type, value, line: 0, count: 1 }], tags: [], hasLink: () => false });
+  const cycle = [typed("M/a.md", "-2", "number"), typed("M/b.md", "-3", "text"), typed("M/c.md", "-10", "number")];
+  const limited = baseModel("views:\n  - sort:\n      - property: v\n    limit: 2\n");
+  const paths = (found: { row: Row }[]) => found.map((e) => e.row.file.path);
+  expect(paths(limited.select(cycle))).toEqual(["M/a.md", "M/b.md"]);
+  const drained = (work: Generator<void, { row: Row }[]>) => { let step = work.next(); while (!step.done) step = work.next(); return step.value; };
+  expect(paths(drained(limited.selectWork(cycle, true)).slice(0, 2))).toEqual(["M/a.md", "M/b.md"]);
+  // The one-task select, as it was: a native sort of the same keys, against random mixes of
+  // numbers, numeric text, words, dates that parse and ones that don't, NaN and empties.
+  let x = 11;
+  const r = (n: number) => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) % n; };
+  const kinds = [() => [String(r(30) - 15), "number"], () => [String(r(30) - 15), "text"], () => [["b", "B", "a10", "a9", "é"][r(5)], "text"], () => [`2024-0${1 + r(9)}-1${r(9)}`, "text"], () => [`2024-13-0${r(9)}`, "text"], () => ["oops", "number"], () => ["", "text"]] as const;
+  const key = (row: Row) => {
+    const p = row.props[0];
+    const value = p.type === "number" && p.value !== "" ? Number(p.value) : p.value;
+    const missing = value === "";
+    const dateLike = typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value);
+    return { missing, value, dateLike, time: dateLike ? parseDate(value as string)?.time : undefined, text: String(value) };
+  };
+  for (let round = 0; round < 60; round++) {
+    const mix = [kinds[r(kinds.length)], kinds[r(kinds.length)], kinds[r(kinds.length)]];
+    const rows = Array.from({ length: 40 + r(40) }, (_, i) => { const [value, type] = mix[r(3)](); return typed(`M/${r(5)}/n${i}.md`, value, type as "number" | "text"); });
+    const keyed = rows.map((row) => ({ row, k: key(row), name: noteName(row.file.path) }));
+    keyed.sort((a, b) => {
+      if (a.k.missing !== b.k.missing) return a.k.missing ? 1 : -1;
+      const p = a.k.value, q = b.k.value;
+      const diff = typeof p === "number" && typeof q === "number" ? p - q : a.k.dateLike && b.k.dateLike ? (a.k.time !== undefined && b.k.time !== undefined ? a.k.time - b.k.time : p < q ? -1 : p > q ? 1 : 0) : compareNames(a.k.text, b.k.text);
+      if (diff) return diff;
+      return compareNames(a.name, b.name) || compareNames(a.row.file.path, b.row.file.path);
+    });
+    const model = baseModel(`views:\n  - sort:\n      - property: v\n    limit: ${10 + r(20)}\n`);
+    const want = keyed.map((k) => k.row.file.path);
+    expect(paths(model.select(rows, true)), `round ${round}`).toEqual(want);
+    expect(paths(drained(model.selectWork(rows, true))), `round ${round}`).toEqual(want);
+    expect(paths(model.select(rows)), `round ${round}`).toEqual(want.slice(0, model.view.limit as number));
+  }
+});

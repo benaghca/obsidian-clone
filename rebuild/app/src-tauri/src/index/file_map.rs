@@ -35,7 +35,7 @@ pub(super) struct Files {
 }
 
 pub(super) struct Walk<'a> {
-    inner: btree_map::Iter<'a, String, Arc<Node>>,
+    inner: btree_map::Range<'a, String, Arc<Node>>,
 }
 
 impl<'a> Iterator for Walk<'a> {
@@ -85,6 +85,11 @@ impl Files {
         self.map.get(key).map(Arc::as_ref)
     }
 
+    /// The node itself, shared, for work done off the vault lock.
+    pub(super) fn get_shared(&self, key: &str) -> Option<&Arc<Node>> {
+        self.map.get(key)
+    }
+
     pub(super) fn contains_key(&self, key: &str) -> bool {
         self.map.contains_key(key)
     }
@@ -117,7 +122,14 @@ impl Files {
 
     /// Every node, in path order. Each yield counts as a file-list visit.
     pub(super) fn iter(&self) -> Walk<'_> {
-        Walk { inner: self.map.iter() }
+        Walk { inner: self.map.range::<str, _>(..) }
+    }
+
+    /// The nodes after `after` (all of them for `None`), in path order. Each yield counts as a
+    /// file-list visit.
+    pub(super) fn after(&self, after: Option<&str>) -> Walk<'_> {
+        let from = after.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded);
+        Walk { inner: self.map.range::<str, _>((from, std::ops::Bound::Unbounded)) }
     }
 
     /// Every path. Each yield counts as a file-list visit.
@@ -145,6 +157,16 @@ impl Files {
             keys.push(key.clone());
         }
         keys
+    }
+
+    /// The node at `rel` (when indexed) and every node below it, in path order (review 8: a
+    /// rescan compares those again for a path the app changed meanwhile).
+    pub(super) fn tree_nodes(&self, rel: &str) -> Vec<(&String, &Node)> {
+        use std::ops::Bound::{Excluded, Included};
+        let mut out: Vec<(&String, &Node)> = self.map.get_key_value(rel).map(|(k, n)| (k, n.as_ref())).into_iter().collect();
+        let (start, end) = (format!("{rel}/"), format!("{rel}0"));
+        out.extend(self.map.range::<str, _>((Included(start.as_str()), Excluded(end.as_str()))).map(|(k, n)| (k, n.as_ref())));
+        out
     }
 
     /// Whether any path lies below `rel`. Visits at most one path.

@@ -301,6 +301,31 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     if (walked?.revision !== revision) walked = { revision, ...walkLinks() };
     return walked;
   }
+  // `link_changes`: a delta from a version this mock served, when every map kept
+  // its keys in the same order (only lists changed), so the page's patch equals
+  // the full reply exactly. Its maps are in file order, not the backend's path
+  // order, so any added or removed key gets the whole index instead.
+  const served = new Map<number, LinkIndex>();
+  function linkChanges(id: number | null, version: number | null) {
+    const now = linkData().links;
+    const before = id === 0 && version !== null ? served.get(version) : undefined;
+    served.set(revision, now);
+    for (const old of served.keys()) if (served.size > 8 && old !== revision) served.delete(old);
+    const fields = ["outgoing", "markdown", "unresolved"] as const;
+    const sameKeys = before && fields.every((f) => {
+      const a = Object.keys(before[f] ?? {}), b = Object.keys(now[f] ?? {});
+      return a.length === b.length && a.every((key, i) => key === b[i]);
+    });
+    if (!before || !sameKeys) return { id: 0, version: revision, since: null, full: structuredClone(now), changed: {} };
+    const changed: Record<string, { outgoing?: string[]; markdown?: string[]; unresolved?: string[] }> = {};
+    for (const f of fields) for (const path of Object.keys(now[f] ?? {})) {
+      if (JSON.stringify(before[f]![path]) === JSON.stringify(now[f]![path])) continue;
+      const entry: (typeof changed)[string] = {};
+      for (const g of fields) if (now[g]?.[path]?.length) entry[g] = structuredClone(now[g]![path]);
+      changed[path] = entry;
+    }
+    return { id: 0, version: revision, since: version, full: null, changed };
+  }
   // Each file's links, kept while its text and the vault's file list are unchanged:
   // the walk after an edit reads only the edited file again.
   type FileLinks = { content: string; out: string[]; md: string[]; missing: string[]; hits: [string, Backlink][] };
@@ -503,6 +528,15 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     },
     // Copies, as IPC hands the page a fresh reply: the walk is kept for the next call.
     link_index: () => structuredClone(linkData().links),
+    // Always the whole index: the mock keeps no history. Its maps are in file
+    // order, not path order, so patching them would not match its full reply.
+    link_changes: ({ id, version }) => {
+      // The time the Rust command would spend, for scripts/bench-link-refresh.mjs.
+      const started = performance.now();
+      const reply = linkChanges(id, version);
+      (globalThis as { __mockLinkMs?: number[] }).__mockLinkMs?.push(performance.now() - started);
+      return reply;
+    },
     backlinks: ({ paths }) => {
       const all = paths.length ? linkData().backlinks : {};
       return structuredClone(Object.fromEntries([...new Set(paths as string[])].filter((path) => all[path]).map((path) => [path, all[path]])));

@@ -5,7 +5,7 @@ import type { GraphSettings } from "../settings/schema";
 import { matches, needs, parseQuery, termsOf, type Query } from "../shell/searchQuery";
 import { vaultTags } from "../shell/vaultTags";
 import type { Workspace } from "../workspace";
-import { buildGraph, graphFileLists, type GraphModel, type GraphNode } from "./data";
+import { buildGraphSteps, graphFileLists, type GraphModel, type GraphNode } from "./data";
 
 export interface ColorRule {
   match(node: GraphNode): boolean;
@@ -32,8 +32,39 @@ const queriesOf = (cfg: GraphSettings) => {
 export function createGraphSource(ws: Workspace, local: boolean) {
   let last: { key: string; promise: Promise<Map<string, Set<string>>> } | null = null;
   const tags = vaultTags(ws);
+  /** `build` in steps (`buildGraphSteps`); the vault's files and links are read once, at the start. */
+  function* buildSteps(cfg: GraphSettings, facts: Facts | null, center: string | null, shown: Set<string> | null): Generator<void, { model: GraphModel; groups: ColorRule[] }> {
+    const { query, groups } = queriesOf(cfg);
+    const matcher = (text: string, q: Query | null): ((path: string) => boolean) => {
+      if (!q) return () => true;
+      if (!needsBackend(q)) return path => matches(path, q, NOTHING);
+      const found = facts?.matched.get(text);
+      return path => found?.has(path) === true;
+    };
+    const test = matcher(cfg.search, query);
+    const { notes, attachments } = graphFileLists(ws.vault.files, path => ws.vault.isExcluded(path));
+    let include = query ? (path: string) => path === center || test(path) : undefined;
+    if (shown) {
+      const base = include;
+      include = path => shown.has(path) && (!base || base(path));
+    }
+    const model = yield* buildGraphSteps(
+      { notes, attachments, links: ws.vault.links, tags: facts?.tags },
+      {
+        showTags: cfg.showTags, showAttachments: cfg.showAttachments,
+        hideUnresolved: cfg.hideUnresolved, showOrphans: local || cfg.showOrphans, include,
+        local: local ? { center: center ?? "", depth: cfg.localJumps, incoming: cfg.localBacklinks, outgoing: cfg.localForelinks, neighbors: cfg.localInterlinks } : undefined,
+      },
+    );
+    return { model, groups: groups.map(g => {
+      const test = matcher(g.text, g.query);
+      return { match: n => !!n.path && test(n.path), rgb: g.color.rgb };
+    }) };
+  }
   return {
     forget() { last = null; tags.forget(); },
+    /** Whether a build reads note text (tags, or a query the backend matches), not only files and links. */
+    readsText(cfg: GraphSettings): boolean { return cfg.showTags || queriesOf(cfg).backend.length > 0; },
     facts(cfg: GraphSettings): Promise<Facts> | null {
       const { backend } = queriesOf(cfg);
       if (!backend.length && !cfg.showTags) return null;
@@ -51,32 +82,12 @@ export function createGraphSource(ws: Workspace, local: boolean) {
       });
     },
     build(cfg: GraphSettings, facts: Facts | null, center: string | null, shown: Set<string> | null): { model: GraphModel; groups: ColorRule[] } {
-      const { query, groups } = queriesOf(cfg);
-      const matcher = (text: string, q: Query | null): ((path: string) => boolean) => {
-        if (!q) return () => true;
-        if (!needsBackend(q)) return path => matches(path, q, NOTHING);
-        const found = facts?.matched.get(text);
-        return path => found?.has(path) === true;
-      };
-      const test = matcher(cfg.search, query);
-      const { notes, attachments } = graphFileLists(ws.vault.files, path => ws.vault.isExcluded(path));
-      let include = query ? (path: string) => path === center || test(path) : undefined;
-      if (shown) {
-        const base = include;
-        include = path => shown.has(path) && (!base || base(path));
+      const steps = buildSteps(cfg, facts, center, shown);
+      for (;;) {
+        const step = steps.next();
+        if (step.done) return step.value;
       }
-      const model = buildGraph(
-        { notes, attachments, links: ws.vault.links, tags: facts?.tags },
-        {
-          showTags: cfg.showTags, showAttachments: cfg.showAttachments,
-          hideUnresolved: cfg.hideUnresolved, showOrphans: local || cfg.showOrphans, include,
-          local: local ? { center: center ?? "", depth: cfg.localJumps, incoming: cfg.localBacklinks, outgoing: cfg.localForelinks, neighbors: cfg.localInterlinks } : undefined,
-        },
-      );
-      return { model, groups: groups.map(g => {
-        const test = matcher(g.text, g.query);
-        return { match: n => !!n.path && test(n.path), rgb: g.color.rgb };
-      }) };
     },
+    buildSteps,
   };
 }

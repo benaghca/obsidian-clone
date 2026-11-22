@@ -14,6 +14,13 @@
 // below `ALPHA_MIN` it is settled and the view stops ticking it altogether.
 // Dragging a node holds alpha up (`alphaTarget`); a change to the graph
 // reheats it a little. Free of the DOM, so it is tested on its own.
+//
+// Review 4: a tick can be taken in steps (`advance`), so one tick of a 50,000
+// node graph (about 95 ms) is spread over several frames instead of holding
+// one. The steps do the same arithmetic in the same order as `tick`, and
+// positions change only in a tick's last step, so the layout is the same
+// tick for tick; only a new graph must wait for the tick to end
+// (`ticking`).
 
 export interface Forces {
   /** Obsidian's "Center force", 0 to 1. */
@@ -39,6 +46,23 @@ const CENTER_SCALE = 0.09;
 const THETA2 = 0.81; // Barnes-Hut accuracy (theta 0.9, squared)
 const DISTANCE_MIN2 = 1;
 
+/** A graph prepared for `Simulation.installGraph`. */
+export interface SimGraph {
+  n: number;
+  /** Per node: the current node whose place and speed it keeps, or -1. */
+  from: Int32Array<ArrayBuffer>;
+  /** Nodes given a place and speed of their own. */
+  given: Map<number, [number, number, number, number]>;
+  ls: Int32Array<ArrayBuffer>;
+  lt: Int32Array<ArrayBuffer>;
+  bias: Float64Array<ArrayBuffer>;
+  strength: Float64Array<ArrayBuffer>;
+  /** (new node, placed neighbour) pairs, in placing order. */
+  plan: number[];
+  /** Nodes left for the spiral, in order. */
+  spiral: number[];
+}
+
 export class Simulation {
   n = 0;
   x = new Float64Array(0);
@@ -57,6 +81,15 @@ export class Simulation {
   private strength = new Float64Array(0);
   private tree = new QuadTree();
   private random = lcg(1);
+  /** The tick under way in steps (`advance`), if any. */
+  private work: Generator<void, void> | null = null;
+  /** Nodes put somewhere by `place` while a tick was under way: they go there when it ends. */
+  private placed = new Map<number, [number, number]>();
+
+  /** Whether a tick is under way: positions move when it ends, and a new graph must wait for that. */
+  get ticking() {
+    return this.work !== null;
+  }
 
   /** Whether it has cooled down: nothing moves any more, so nothing needs to tick. */
   get settled() {
@@ -70,57 +103,146 @@ export class Simulation {
    * for the same graph, so it opens the same way each time).
    */
   setGraph(ids: readonly string[], links: readonly { source: number; target: number }[], known: (id: string) => [number, number, number, number] | undefined) {
+    const steps = this.prepareGraph(ids, links, known);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return this.installGraph(step.value);
+    }
+  }
+
+  /**
+   * `setGraph` in two parts (review 3): this works out everything that does not
+   * depend on where the current nodes are, in steps (it yields), without
+   * touching the simulation, and `installGraph` then puts it in place. `known`
+   * gives a node's place and speed, or the index of the current node whose
+   * place and speed it keeps (read when it is installed, so the layout keeps
+   * moving meanwhile).
+   */
+  *prepareGraph(
+    ids: readonly string[],
+    links: readonly { source: number; target: number }[],
+    known: (id: string) => number | [number, number, number, number] | undefined,
+  ): Generator<void, SimGraph> {
     const n = ids.length;
+    const from = new Int32Array(n).fill(-1);
+    const given = new Map<number, [number, number, number, number]>();
+    const placed = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if ((i & 4095) === 4095) yield;
+      const k = known(ids[i]);
+      if (k === undefined) continue;
+      if (typeof k === "number") from[i] = k;
+      else given.set(i, k);
+      placed[i] = 1;
+    }
+    const m = links.length;
+    const ls = new Int32Array(m);
+    const lt = new Int32Array(m);
+    const bias = new Float64Array(m);
+    const strength = new Float64Array(m);
+    const degree = new Int32Array(n);
+    for (let i = 0; i < m; i++) {
+      if ((i & 4095) === 4095) yield;
+      const l = links[i];
+      ls[i] = l.source;
+      lt[i] = l.target;
+      degree[l.source]++;
+      degree[l.target]++;
+    }
+    for (let i = 0; i < m; i++) {
+      if ((i & 4095) === 4095) yield;
+      const s = degree[ls[i]];
+      const t = degree[lt[i]];
+      bias[i] = s / (s + t);
+      strength[i] = 1 / Math.min(s, t);
+    }
+    // New nodes beside an already placed neighbour, in the order `installGraph`
+    // places them: (new node, its neighbour) pairs.
+    const plan: number[] = [];
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < m; i++) {
+        if ((i & 4095) === 4095) yield;
+        const a = ls[i];
+        const b = lt[i];
+        if (placed[a] === placed[b]) continue;
+        const [anchor, to] = placed[a] ? [a, b] : [b, a];
+        plan.push(to, anchor);
+        placed[to] = 1;
+      }
+      if (pass === 0 && placed.every((p) => !p)) break;
+    }
+    const spiral: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if ((i & 4095) === 4095) yield;
+      if (!placed[i]) spiral.push(i);
+    }
+    return { n, from, given, ls, lt, bias, strength, plan, spiral };
+  }
+
+  /**
+   * Put node `i` at (`px`, `py`) (a drag). Between ticks it goes there now. During a tick it
+   * goes there when the tick ends (review 5): the tick under way reads every position as it
+   * was when it began, as a whole tick does, so the layout is the same as with the move made
+   * at that boundary. `showing` shows it there meanwhile.
+   */
+  place(i: number, px: number, py: number) {
+    if (this.work) this.placed.set(i, [px, py]);
+    else [this.x[i], this.y[i]] = [px, py];
+  }
+
+  /**
+   * `fn` with the nodes `place` holds back shown where they were put (for drawing and hit
+   * tests, which run between a tick's steps, never during one).
+   */
+  showing<T>(fn: () => T): T {
+    if (!this.placed.size) return fn();
+    const kept: [number, number, number][] = [];
+    for (const [i, [px, py]] of this.placed) {
+      kept.push([i, this.x[i], this.y[i]]);
+      [this.x[i], this.y[i]] = [px, py];
+    }
+    try {
+      return fn();
+    } finally {
+      for (const [i, ox, oy] of kept) [this.x[i], this.y[i]] = [ox, oy];
+    }
+  }
+
+  /** Put a prepared graph in place (`prepareGraph`): one pass over its nodes, and the new ones placed. */
+  installGraph(g: SimGraph) {
+    // Between ticks only (the view waits for `ticking` to end); a tick under way ends first.
+    while (this.work && !this.advance(Infinity));
+    const { n, from, given } = g;
+    const [ox, oy, ovx, ovy] = [this.x, this.y, this.vx, this.vy];
     this.n = n;
     this.x = new Float64Array(n);
     this.y = new Float64Array(n);
     this.vx = new Float64Array(n);
     this.vy = new Float64Array(n);
     this.fixed = new Uint8Array(n);
-    const placed = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
-      const k = known(ids[i]);
-      if (!k) continue;
-      [this.x[i], this.y[i], this.vx[i], this.vy[i]] = k;
-      placed[i] = 1;
+      const j = from[i];
+      if (j < 0) continue;
+      this.x[i] = ox[j];
+      this.y[i] = oy[j];
+      this.vx[i] = ovx[j];
+      this.vy[i] = ovy[j];
     }
-    const m = links.length;
-    this.ls = new Int32Array(m);
-    this.lt = new Int32Array(m);
-    this.bias = new Float64Array(m);
-    this.strength = new Float64Array(m);
-    const degree = new Int32Array(n);
-    links.forEach((l, i) => {
-      this.ls[i] = l.source;
-      this.lt[i] = l.target;
-      degree[l.source]++;
-      degree[l.target]++;
-    });
-    for (let i = 0; i < m; i++) {
-      const s = degree[this.ls[i]];
-      const t = degree[this.lt[i]];
-      this.bias[i] = s / (s + t);
-      this.strength[i] = 1 / Math.min(s, t);
-    }
-    // New nodes: beside an already placed neighbour (a note just linked
-    // appears by its note), else on the spiral.
+    for (const [i, k] of given) [this.x[i], this.y[i], this.vx[i], this.vy[i]] = k;
+    this.ls = g.ls;
+    this.lt = g.lt;
+    this.bias = g.bias;
+    this.strength = g.strength;
     const spacing = Math.max(20, this.forces.distance / 6);
-    for (let pass = 0; pass < 2; pass++) {
-      for (let i = 0; i < m; i++) {
-        const a = this.ls[i];
-        const b = this.lt[i];
-        if (placed[a] === placed[b]) continue;
-        const [from, to] = placed[a] ? [a, b] : [b, a];
-        const angle = this.random() * Math.PI * 2;
-        this.x[to] = this.x[from] + Math.cos(angle) * spacing;
-        this.y[to] = this.y[from] + Math.sin(angle) * spacing;
-        placed[to] = 1;
-      }
-      if (pass === 0 && placed.every((p) => !p)) break;
+    for (let p = 0; p < g.plan.length; p += 2) {
+      const to = g.plan[p];
+      const anchor = g.plan[p + 1];
+      const angle = this.random() * Math.PI * 2;
+      this.x[to] = this.x[anchor] + Math.cos(angle) * spacing;
+      this.y[to] = this.y[anchor] + Math.sin(angle) * spacing;
     }
     let k = 0;
-    for (let i = 0; i < n; i++) {
-      if (placed[i]) continue;
+    for (const i of g.spiral) {
       const r = spacing * Math.sqrt(0.5 + k);
       const angle = k * Math.PI * (3 - Math.sqrt(5));
       this.x[i] = r * Math.cos(angle);
@@ -134,17 +256,44 @@ export class Simulation {
     this.alpha = Math.max(this.alpha, alpha);
   }
 
+  /** One whole tick (the rest of one under way, if `advance` began it). */
   tick() {
+    while (!this.advance(Infinity));
+  }
+
+  /**
+   * Work on the tick under way, or begin the next one, until `performance.now()`
+   * reaches `until`. True when a tick ended (the nodes moved); a new tick is
+   * begun only by the next call.
+   */
+  advance(until: number): boolean {
+    this.work ??= this.steps();
+    for (;;) {
+      if (this.work.next().done) {
+        this.work = null;
+        return true;
+      }
+      if (performance.now() >= until) return false;
+    }
+  }
+
+  /**
+   * A tick, pausing (yielding) every few thousand links or tree inserts and every
+   * few hundred nodes. Alpha and the forces are read when it begins; a node being
+   * dragged is moved by the view in between, as between two ticks.
+   */
+  private *steps(): Generator<void, void> {
     this.alpha += (this.alphaTarget - this.alpha) * ALPHA_DECAY;
     const alpha = this.alpha;
     const { x, y, vx, vy, n } = this;
-    const f = this.forces;
+    const f = { ...this.forces };
 
     // Link force: each link pulls (or pushes) towards its distance, more on
     // the end with fewer links, as in d3.
     if (f.link > 0) {
       const { ls, lt, bias, strength } = this;
       for (let i = 0; i < ls.length; i++) {
+        if ((i & 4095) === 4095) yield;
         const s = ls[i];
         const t = lt[i];
         let dx = x[t] + vx[t] - x[s] - vx[s] || this.jiggle();
@@ -164,8 +313,11 @@ export class Simulation {
     // Repel force, Barnes-Hut.
     if (f.repel > 0 && n > 1) {
       const strength = -f.repel * REPEL_SCALE;
-      this.tree.build(x, y, n);
-      for (let i = 0; i < n; i++) this.tree.apply(i, x, y, vx, vy, strength * alpha, () => this.jiggle());
+      yield* this.tree.build(x, y, n);
+      for (let i = 0; i < n; i++) {
+        if ((i & 511) === 511) yield;
+        this.tree.apply(i, x, y, vx, vy, strength * alpha, () => this.jiggle());
+      }
     }
 
     // Centre force: towards (0, 0), proportional to the distance.
@@ -177,6 +329,7 @@ export class Simulation {
       }
     }
 
+    // In one step, so a frame never draws a half-moved layout.
     for (let i = 0; i < n; i++) {
       if (this.fixed[i]) {
         vx[i] = vy[i] = 0;
@@ -185,6 +338,9 @@ export class Simulation {
       x[i] += vx[i] *= VELOCITY_KEEP;
       y[i] += vy[i] *= VELOCITY_KEEP;
     }
+    // Moves made during the tick, at its end.
+    for (const [i, [px, py]] of this.placed) [x[i], y[i]] = [px, py];
+    this.placed.clear();
   }
 
   /** Two nodes in exactly the same place push apart in a random direction. */
@@ -259,7 +415,8 @@ class QuadTree {
     return c;
   }
 
-  build(x: Float64Array, y: Float64Array, n: number) {
+  /** Rebuilt over the nodes, pausing (yielding) every few thousand inserts. */
+  *build(x: Float64Array, y: Float64Array, n: number): Generator<void, void> {
     if (this.next.length < n) this.next = new Int32Array(n);
     this.next.fill(-1, 0, n);
     let minX = Infinity;
@@ -276,7 +433,10 @@ class QuadTree {
     this.count = 0;
     this.grow(2 * n + 1);
     const root = this.cell(minX, minY, size);
-    for (let i = 0; i < n; i++) this.insert(root, i, x, y);
+    for (let i = 0; i < n; i++) {
+      if ((i & 4095) === 4095) yield;
+      this.insert(root, i, x, y);
+    }
   }
 
   private insert(root: number, i: number, x: Float64Array, y: Float64Array) {

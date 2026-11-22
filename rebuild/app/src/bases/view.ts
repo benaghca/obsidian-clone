@@ -22,7 +22,8 @@ import { createList } from "./list";
 import { columnControls, columnWidth, type ColumnSample, type ColumnWidthInput } from "./columns";
 import { cellEditor } from "./cells";
 import { baseModel, baseNoteFiles, noteKey, propertyId, viewGlyph, type Row } from "./model";
-import type { Value } from "./expression";
+import type { Reads, Value } from "./expression";
+import { linkEntryOf } from "../links/linkDelta";
 import { mapping, readYaml, type Yaml } from "./yaml";
 import { createGroupedView, runSliced, type Entry } from "./groups";
 import { searchWork, rowText } from "./search";
@@ -153,6 +154,25 @@ export const readsChanged = (source: string, host: string | null, changed: reado
  * (KANBAN_PLAN §4.5 step 5). `file.backlinks` is the case the plan names.
  */
 export const readsOtherFiles = (source: string) => /\bfile\.(?:backlinks|links|embeds)\b|\.hasLink\s*\(/.test(source);
+
+/** True when a formula, filter, sort or column reads tags (`vaultTags`, re-read on each link refresh). */
+export const readsTags = (source: string) => /file\.(?:tags|hasTag)/.test(source);
+
+/**
+ * Whether a link refresh that changed `touched` notes' entries (null: unknown)
+ * can change a base that reads `reads` (null: unknown). Rows read the link index
+ * only through `hasLink` (and `file.links` and kin), so a refresh that changed no
+ * entry, or a base that reads no links, has nothing to redo. Tags are re-read on
+ * a link refresh (`vaultTags`), so a base that reads them rebuilds, as before.
+ * `reads` comes from the compiled filters, formulas and keys (`baseReads`), not
+ * from the YAML's spelling (review 2: `file. hasLink("Hub")` is a valid filter).
+ */
+export const linkRefreshMatters = (touched: ReadonlySet<string> | null, reads: Readonly<Reads> | null) =>
+  !touched || !reads || reads.tags || (touched.size > 0 && reads.links);
+
+/** A base's reads: its compiled model's, widened by the YAML text checks used before (either is enough). */
+export const baseReads = (model: { reads: Readonly<Reads> }, source: string): Reads =>
+  ({ links: model.reads.links || readsOtherFiles(source), tags: model.reads.tags || readsTags(source) });
 
 /** Frontmatter the board painted versus the property index's re-read of that note. */
 export function sameProperties(a: readonly Property[] | undefined, b: readonly Property[] | undefined): boolean {
@@ -495,7 +515,8 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const resize = new ResizeObserver(() => { if(!cards()&&!isList()&&!controls.active)applySizes();paint(true); }); resize.observe(scroller);
   // Own-write reconcile (K6). `lastMs` is the update work, not the scheduling delay.
   const ECHO_MS = 500;
-  const reconcile = { full: 0, skip: 0, lastMs: 0 };
+  // `slice`: the longest task of the last full pass's sliced part (review 3; 0 when it ran at once).
+  const reconcile = { full: 0, skip: 0, lastMs: 0, slice: 0 };
   Object.assign(el, { reconcile });
   // Armed only for a loaded note, and only with the text the skip already saw. A closed note has no later save to absorb.
   const echoed = new Map<string, { at: number; text: string }>();
@@ -527,7 +548,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
       own: own !== undefined,
       echo,
       readsThis: notice.paths.length === 1 && readsChanged(source, hostPath(), notice.paths),
-      readsOther: readsOtherFiles(source),
+      readsOther: model ? baseReads(model, source).links : readsOtherFiles(source),
     });
     if (decision === "links") { reconcile.skip++; reconcile.lastMs = 0; return true; }
     if (decision !== "own" || !path) { echoed.clear(); return false; }
@@ -565,6 +586,8 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         if (dirty) continue;
         const iterationStart = performance.now();
         let countFull = false;
+        // Time this pass spent waiting between its slices: not work (`lastMs` is the work).
+        let idle = 0;
         try {
         if (reload || !model) {
           reload = false; source = await file.read(); model = baseModel(source, viewIndex);
@@ -575,12 +598,22 @@ export function createBase(ws: Workspace, o: BaseOptions) {
           viewIndex = model.viewIndex; o.remember?.(viewIndex);
         }
         const properties = await index.notes();
-        const needsTags = /file\.(?:tags|hasTag)/.test(source);
+        const needsTags = baseReads(model!, source).tags;
         const tags = needsTags ? await vaultTags(ws).read() : new Map<string, string[]>();
         if (gone || dirty) continue;
         if (editing()) { dirty = false; break; }
-        types = new Map(); inferred = new Map();
-        for (const { props } of properties.values()) for (const p of props) if (!types.has(p.key)) { types.set(p.key, index.host.typeOf(p.key) ?? p.type); inferred.set(p.key, p.type); }
+        // Rows and their selection, in steps (review 3). A Base already on screen takes them in
+        // slices a frame apart, so a link change at 50k notes is no single long task; the
+        // first pass runs at once. Every read below is of this pass's snapshot (`links`), so
+        // the slices agree with each other.
+        const links = ws.vault.links, m = model!;
+        const pass = function* () {
+        const nextTypes = new Map<string, PropertyType>(), nextInferred = new Map<string, PropertyType>();
+        let seen = 0;
+        for (const { props } of properties.values()) {
+          for (const p of props) if (!nextTypes.has(p.key)) { nextTypes.set(p.key, index.host.typeOf(p.key) ?? p.type); nextInferred.set(p.key, p.type); }
+          if ((++seen & 127) === 0) yield;
+        }
         const linkCache = new Map<string, string | null>();
         const row = (file: FileEntry): Row => {
           const props = properties.get(file.path)?.props ?? [];
@@ -592,17 +625,34 @@ export function createBase(ws: Workspace, o: BaseOptions) {
           return { file, props, tags: allTags, hasLink: link => {
             const cacheKey = `${parentDir(file.path)}\0${link}`;
             if (!linkCache.has(cacheKey)) linkCache.set(cacheKey, ws.resolve(link.replace(/^\[\[|\]\]$/g, ""), file.path));
-            const target = linkCache.get(cacheKey), links = ws.vault.links;
-            return !!target && [...links.outgoing[file.path] ?? [], ...links.markdown?.[file.path] ?? []].includes(target);
+            // One note's entry, without building the whole maps (review 2).
+            const target = linkCache.get(cacheKey), entry = linkEntryOf(links, file.path);
+            return !!target && [...entry.outgoing ?? [], ...entry.markdown ?? []].includes(target);
           } };
         };
-        const rows = baseNoteFiles(ws.vault.files, (path) => ws.vault.isExcluded(path)).map(row);
+        const files = baseNoteFiles(ws.vault.files, (path) => ws.vault.isExcluded(path)), rows: Row[] = [];
+        for (let i = 0; i < files.length; i++) { rows.push(row(files[i])); if ((i & 127) === 127) yield; }
         // `this`, when the YAML reads it: its note's row (a copy, so its context has no `this` of its own), or any file's, such as the .base itself.
         const hostNow = hostPath();
         const hostFile = hostNow === null || !/\bthis\b/.test(source) ? undefined : rows.find(r => r.file.path === hostNow)?.file ?? ws.vault.entry(hostNow);
-        host = hostFile && row(hostFile);
-        if (host) for (const r of rows) r.host = host;
-        const matches = model!.select(rows,true);model!.total=matches.length;
+        const hostRow = hostFile && row(hostFile);
+        if (hostRow) for (const r of rows) r.host = hostRow;
+        const matches = yield* m.selectWork(rows, true);
+        return { matches, hostRow, nextTypes, nextInferred };
+        };
+        let done, longest = 0;
+        if (reconcile.full === 0) done = drain(pass());
+        else {
+          const sliced = performance.now();
+          let worked = 0;
+          try { done = await runSliced(pass(), { cancelled: () => gone || dirty || model !== m, onSlice: (ms) => { worked += ms; longest = Math.max(longest, ms); } }); }
+          catch (error) { if (error instanceof Error && error.name === "AbortError") continue; throw error; }
+          idle = Math.max(0, performance.now() - sliced - worked);
+        }
+        const { matches, hostRow, nextTypes, nextInferred } = done;
+        reconcile.slice = longest;
+        types = nextTypes; inferred = nextInferred; host = hostRow;
+        model!.total=matches.length;
         countFull = true;
         selected = typeof model!.view.limit === "number" ? matches.slice(0,model!.view.limit) : matches;
         const found = query ? await searched(selected, () => gone || dirty) : selected;
@@ -649,7 +699,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         } finally {
           if (countFull) {
             reconcile.full++;
-            reconcile.lastMs = performance.now() - iterationStart;
+            reconcile.lastMs = performance.now() - iterationStart - idle;
           }
         }
       }
@@ -726,6 +776,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const outside = (changed: string[], before: (note: string) => string | null) => !readsChanged(source, hostPath(), changed) && docsOutsideFilter(changed, source, viewIndex,
     note => ws.editors.isLoaded(note) ? ws.editors.doc(note)?.toString() ?? null : null,
     note => selected.some(entry => entry.row.file.path === note), before);
+  const linksMatter = (touched: ReadonlySet<string> | null) => reload || !model || linkRefreshMatters(touched, baseReads(model, source));
   const unwatch = ws.vault.onModified(changed => {
     const before = changedFrom.get(changed) ?? null;
     changedFrom.delete(changed);
@@ -735,6 +786,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     schedule();
   });
   const off = ws.on(change => {
+    if (change === "links" && !linksMatter(ws.vault.linkTouch)) return;
     const changed = change === "doc" && shown() ? changedNotes() : null;
     const next = baseChange({
       change,
@@ -765,6 +817,14 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     reload() { reload = true; schedule(); },
     dispose() { gone = true; controls.dispose(); menus.dispose(); groupedView.dispose(); board.dispose(); listPane.dispose(); unwatch(); off(); unsettle(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); },
   };
+}
+
+/** Run steps to the end at once. */
+function drain<T>(work: Generator<void, T>): T {
+  for (;;) {
+    const step = work.next();
+    if (step.done) return step.value;
+  }
 }
 
 const viewsByTab = new WeakMap<Tab, Map<string, number>>();

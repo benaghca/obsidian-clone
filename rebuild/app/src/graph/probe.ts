@@ -5,7 +5,7 @@
 import { type Camera, toScreen } from "./camera";
 import type { GraphModel } from "./data";
 
-type DevWindow = { __graphWork?: number[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown };
+type DevWindow = { __graphWork?: number[]; __graphBuilds?: { at: number; ms: number; span: number; slice: number; install: number }[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown; __graphHold?: boolean; __graphBuildHold?: boolean; __graphBuildHeld?: number; __graphBuildPass?: number; __graphBuildHeldBy?: number };
 const dev = window as unknown as DevWindow;
 
 /** Each frame's work (ms). */
@@ -14,6 +14,13 @@ export const devStats = import.meta.env.DEV
       (dev.__graphWork ??= []).push(ms);
       dev.__graphNodes = nodes;
       dev.__graphRunning = running;
+    }
+  : null;
+
+/** Each model rebuild: when it ended (performance.now), its work (ms, summed over its slices), the time from start to installed (ms), its longest slice (ms, the install included), and the install alone (ms). */
+export const devBuilt = import.meta.env.DEV
+  ? (ms: number, span: number, slice: number, install: number) => {
+      (dev.__graphBuilds ??= []).push({ at: performance.now(), ms, span, slice, install });
     }
   : null;
 
@@ -41,3 +48,26 @@ export function setProbe(canvas: HTMLCanvasElement, cam: Camera, view: () => { m
     return { node: best >= 0 ? at(best) : null, empty, scale: cam.scale, nodes: model.nodes.length, links: model.links.length };
   };
 }
+
+/**
+ * Tests only (review 5): while `window.__graphHold` is set, a rebuilt layout graph waits as if
+ * a tick were under way, so a test can deliver a link change between preparing and installing.
+ */
+export const devHold = import.meta.env.DEV ? () => !!dev.__graphHold : null;
+
+/**
+ * Tests only (review 6): while `window.__graphBuildHold` is set, a rebuild of a graph already on
+ * screen stops after its first step (`window.__graphBuildHeld` counts the holds), so a test can
+ * deliver a link change while one is under way. Review 8: and after each later step; setting
+ * `window.__graphBuildPass` to n lets it go on n steps while still held, and
+ * `window.__graphBuildHeldBy` is the held build's number (a build started over gets a new one).
+ */
+export const devBuildHold = import.meta.env.DEV
+  ? async (build: number): Promise<void> => {
+      dev.__graphBuildHeld = (dev.__graphBuildHeld ?? 0) + 1;
+      dev.__graphBuildHeldBy = build;
+      while (dev.__graphBuildHold && !((dev.__graphBuildPass ?? 0) > 0)) await new Promise((resolve) => setTimeout(resolve, 10));
+      if ((dev.__graphBuildPass ?? 0) > 0) dev.__graphBuildPass = (dev.__graphBuildPass ?? 0) - 1;
+    }
+  : null;
+export const devBuildHolding = import.meta.env.DEV ? () => !!dev.__graphBuildHold : null;

@@ -6,9 +6,9 @@
 //! the call returns, so the next `list_files`, `search`, or `link_index` already sees the change.
 
 use crate::fsutil::{self, atomic_write};
-use crate::index::{Index, Stamp};
+use crate::index::{Index, RescanDiff, Stamp};
 use crate::model::{push_change, ChangeKind, FileEntry, VaultChanged};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -484,35 +484,65 @@ impl Vault {
 
     /// Reconcile only paths changed by the app during the scan, then diff and swap.
     /// Both replay and swap hold the state lock: a completed write can never be lost.
+    #[cfg(test)]
     pub fn finish_rescan(&mut self, token: &Arc<()>, fresh: Result<Index, String>) -> Vec<VaultChanged> {
-        if !self.rescan.as_ref().is_some_and(|current| Arc::ptr_eq(current, token)) {
-            return Vec::new();
+        self.finish_rescan_retiring(token, fresh).0
+    }
+
+    /// `finish_rescan` in one hold, handing back the index it replaced (or the fresh one, when
+    /// the scan is stale), for the caller to drop once it has let go of the state lock (review
+    /// 5: freeing a large vault's index is not lock work). Review 8: the watcher finishes in
+    /// steps instead (`watch::finish_rescan_in_steps`); this makes the same steps at once.
+    pub(crate) fn finish_rescan_retiring(&mut self, token: &Arc<()>, fresh: Result<Index, String>) -> (Vec<VaultChanged>, Option<Index>) {
+        if !self.rescan_is(token) {
+            // A stale scan: its index goes back too, to be freed off the lock (review 6).
+            return (Vec::new(), fresh.ok());
+        }
+        let Ok(mut fresh) = fresh else {
+            self.rescan = None;
+            self.index.take_rescan_changes();
+            return (Vec::new(), None);
+        };
+        self.rescan_prepare(&mut fresh);
+        let mut diff = self.index.rescan_diff(&fresh);
+        while !self.index.rescan_diff_step(&fresh, &mut diff, usize::MAX) {}
+        self.finish_rescan_stepped(token, fresh, diff)
+    }
+
+    /// Whether `token` is still this vault's rescan (not replaced, nor the vault reopened).
+    pub(crate) fn rescan_is(&self, token: &Arc<()>) -> bool {
+        self.rescan.as_ref().is_some_and(|current| Arc::ptr_eq(current, token))
+    }
+
+    /// Ready a rescan's fresh index for replays: with the live index's deferral (review 3), so a
+    /// high-fanout key a replay touches is queued (and resolved later, off the lock).
+    pub(crate) fn rescan_prepare(&self, fresh: &mut Index) {
+        fresh.defer_links_like(&self.index);
+    }
+
+    /// Review 8: a catch-up round. The paths the app changed since the rescan began (or since
+    /// the last round), for the watcher to replay into the fresh index without the lock; the
+    /// index goes on recording. `None` for a stale rescan.
+    pub(crate) fn rescan_catch_up(&mut self, token: &Arc<()>) -> Option<BTreeSet<String>> {
+        self.rescan_is(token).then(|| self.index.drain_rescan_changes())
+    }
+
+    /// The final hold of a rescan whose comparison `diff` was made in steps: replay what the
+    /// app changed since the last catch-up (from disk, as it now stands: every write before
+    /// this hold completed), compare those paths again, and swap. A write can never be lost:
+    /// each one is recorded until this hold, and replayed here if it came after the last round.
+    pub(crate) fn finish_rescan_stepped(&mut self, token: &Arc<()>, mut fresh: Index, diff: RescanDiff) -> (Vec<VaultChanged>, Option<Index>) {
+        if !self.rescan_is(token) {
+            return (Vec::new(), Some(fresh));
         }
         self.rescan = None;
         let paths = self.index.take_rescan_changes();
-        let Ok(mut fresh) = fresh else {
-            return Vec::new();
-        };
-        for path in paths {
-            fresh.remove_tree(&path);
-            fresh.refresh_path(&self.root, &path);
-        }
-        let mut removed = Vec::new();
-        let mut created = Vec::new();
-        let mut modified = Vec::new();
-        for path in self.index.paths() {
-            if !fresh.contains(path) {
-                removed.push(path.clone());
-            } else if !fresh.is_dir(path) && self.index.stamp(path) != fresh.stamp(path) {
-                modified.push(path.clone());
-            }
-        }
-        for path in fresh.paths() {
-            if !self.index.contains(path) {
-                created.push(path.clone());
-            }
-        }
-        self.index = fresh;
+        fresh.replay(&self.root, &paths);
+        // The page keeps patching its link index across the swap: the history continues from
+        // the entries the fresh index holds now, and its queued work (from the replay) stays
+        // queued, so settling it later logs the rest.
+        let (removed, created, modified) = self.index.finish_rescan_diff(&mut fresh, diff, &paths);
+        let retired = std::mem::replace(&mut self.index, fresh);
         let created_set: HashSet<&str> = created.iter().map(String::as_str).collect();
         self.formats
             .lock()
@@ -522,7 +552,7 @@ impl Vault {
         push_change(&mut out, ChangeKind::Remove, removed);
         push_change(&mut out, ChangeKind::Create, created);
         push_change(&mut out, ChangeKind::Modify, modified);
-        out
+        (out, Some(retired))
     }
 
     /// Remember a successful atomic write. `md` is the receipt from before

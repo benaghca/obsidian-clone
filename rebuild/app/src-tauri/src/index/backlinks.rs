@@ -1,33 +1,21 @@
 //! Linked mentions for requested destinations, without shipping every source line.
-use super::{is_note_path, Index};
+#[cfg(test)]
+use super::{BacklinkReply, Index, ReplyStep};
+#[cfg(test)]
 use crate::model::Backlink;
-use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+use std::collections::BTreeMap;
 
+#[cfg(test)]
 impl Index {
+    /// Read from the link table's reverse index: only the notes that link to `paths` are
+    /// visited, in path order, each link in note order (the order a walk of every note gave).
+    /// The same steps `link_reads` takes between holds of the lock, taken at once.
     pub fn backlinks(&self, paths: &[String]) -> BTreeMap<String, Vec<Backlink>> {
-        let wanted: BTreeSet<&String> = paths.iter().collect();
-        let mut found: BTreeMap<String, Vec<Backlink>> = BTreeMap::new();
-        if wanted.is_empty() {
-            return found;
-        }
-        for (from, node) in &self.files {
-            if node.is_dir || !is_note_path(from) {
-                continue;
-            }
-            for link in &node.note.links {
-                let Some(target) = self.resolve(from, &link.target) else {
-                    continue;
-                };
-                if wanted.contains(&target) {
-                    found.entry(target).or_default().push(Backlink {
-                        from: from.clone(),
-                        line: link.line,
-                        text: link.text.clone(),
-                    });
-                }
-            }
-        }
-        found
+        debug_assert!(!self.links.has_pending(), "link table read before it settled");
+        let mut reply = BacklinkReply::new(paths);
+        while reply.step(self) == ReplyStep::More {}
+        reply.finish()
     }
 }
 

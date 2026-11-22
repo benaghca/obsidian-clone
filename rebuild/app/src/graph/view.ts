@@ -11,6 +11,9 @@
 // When all of that has settled no frame is requested at all, and a hidden
 // graph (a background tab, a closed sidebar) does nothing until shown.
 //
+// A tick too long for one frame is spread over several (`Simulation.advance`,
+// review 4): the same layout, tick for tick, with frames drawn in between.
+//
 // The webview's canvas is drawn on the CPU in WebKitGTK. While the graph
 // moves, a canvas far too slow to draw at full resolution is drawn at one
 // pixel per CSS pixel, then once more at full resolution when it comes to
@@ -18,20 +21,22 @@
 // drawn every other frame, leaving the rest of each frame to the editor.
 // The graph follows the vault through the workspace's "links" and "files"
 // changes (which come a moment after a save, never on a keystroke), and an
-// update keeps every node that is still there where it is.
+// update keeps every node that is still there where it is. A "links" change
+// that changed no note this graph can show is skipped (`linksMatter`).
 
+import { linkEntryOf } from "../links/linkDelta";
 import { duration } from "../motion";
 import { h } from "../shell/dom";
 import type { OpenWhere } from "../tabs";
 import type { Workspace } from "../workspace";
 import { camera, easeZoom, fitAround, hitTest, panBy, toWorld, wheelZoom } from "./camera";
-import { type GraphModel, type GraphNode, neighbours, nodeColor, nodeRadius } from "./data";
+import { drawOrder, type GraphModel, type GraphNode, localLinksMatter, neighbourSteps, nodeColor, nodeRadius, sameShape } from "./data";
 import { type Colors, drawGraph, readGraphColors } from "./draw";
 import { graphInput } from "./input";
 import { createGraphPanel } from "./panel";
-import { devStats, setProbe } from "./probe";
+import { devBuildHold, devBuildHolding, devBuilt, devHold, devStats, setProbe } from "./probe";
 import { changedIn, DATA_KEYS, FORCE_KEYS, graphSettings, resetGraphSettings, setGraphSetting } from "./settings";
-import { Simulation } from "./sim";
+import { type SimGraph, Simulation } from "./sim";
 import { type ColorRule, createGraphSource, type Facts } from "./source";
 import type { GraphSettings } from "../settings/schema";
 import { settings } from "../settings/store";
@@ -57,6 +62,13 @@ interface GraphHost {
 export type GraphView = ReturnType<typeof createGraphView>;
 
 const REFRESH_DELAY = 200;
+/** Longest stretch of an update's rebuild in one task (ms). */
+const SLICE_MS = 6;
+/**
+ * Most of a frame the layout may take (ms). A tick that takes longer (about 95 ms at 50,000
+ * nodes) goes on in the next frames (review 4); one that fits still takes one frame, as before.
+ */
+const TICK_MS = 12;
 /** A canvas slower than this (ms) to draw is drawn every other frame while it settles on its own. */
 const SLOW_FRAME = 10;
 /**
@@ -116,7 +128,8 @@ export function createGraphView(host: GraphHost) {
   let palette: string[] = [];
   let paletteAlpha: number[] = [];
   let order = new Int32Array(0);
-  let signature = "";
+  /** The next install lays the graph out again even when its shape is the same (a timelapse). */
+  let relayout = true;
   let built = false;
 
   const cam = camera(cfg.scale);
@@ -153,6 +166,23 @@ export function createGraphView(host: GraphHost) {
   let refreshTimer = 0;
   let seq = 0;
   let stale = true;
+  /**
+   * The sliced rebuild under way (its `seq`), from the links as they were when it started; 0
+   * for none. Review 7: one cancelled by `scheduleRebuild` is no longer under way, and only a
+   * build's own `seq` clears it, so an older one stopping never clears a newer one's.
+   */
+  let building = 0;
+  /** A rebuild's new layout graph, waiting for the tick under way to end (`step`). */
+  let waiting: Prepared | null = null;
+  /**
+   * Review 8: link changes made while the build under way runs, checked against its model
+   * before it goes in, so changes it cannot show don't start it over. Null when it can't be
+   * checked that way (a first build, the global graph, a build reading note text or showing a
+   * timelapse): a link change then cancels it, as before.
+   */
+  let heldTouch: Set<string> | null = null;
+  /** Whether `waiting` came from such a build (and was checked when it was done). */
+  let waitingChecked = false;
 
   /**
    * Rebuild the model from the vault and options. Runs synchronously when
@@ -162,54 +192,151 @@ export function createGraphView(host: GraphHost) {
   async function rebuild() {
     const mine = ++seq;
     stale = false;
+    // This rebuild starts from what is shown, so one still waiting is superseded.
+    waiting = null;
     let facts: Facts | null = null;
     const asked = source.facts(cfg);
     if (asked) {
       facts = await asked;
       if (mine !== seq || disposed) return;
     }
+    const started = performance.now();
     const center = local ? (host.file?.() ?? null) : null;
     const shown = reveal ? new Set(reveal.order.slice(0, reveal.shown)) : null;
-    const { model: next, groups } = source.build(cfg, facts, center, shown);
-    setModel(next, groups);
+    // A first build runs to the end now, so a new graph's first frame has its nodes. An
+    // update of a graph already on screen runs in slices of at most SLICE_MS, a frame apart,
+    // while the old one stays up (review 2): a 50k-note rebuild no longer takes one long task.
+    // Review 3: so does preparing it for the screen (`prepare`); only `install` is left for
+    // the last slice.
+    const built_ = source.buildSteps(cfg, facts, center, shown);
+    const steps = (function* () {
+      const { model: next, groups } = yield* built_;
+      return yield* prepare(next, groups);
+    })();
+    // The build reads the vault's links once, in its first step (`buildSteps`).
+    const read = ws.vault.links;
+    const checked = built && local && !reveal && !source.readsText(cfg);
+    building = mine;
+    heldTouch = checked ? new Set() : null;
+    let step = steps.next();
+    let slice = performance.now();
+    let work = 0;
+    let longest = 0;
+    for (;;) {
+      // Tests (dev only): held after its first step, and (review 8) after each later one.
+      if (built && devBuildHold && devBuildHolding?.()) {
+        await devBuildHold(mine);
+        if (mine !== seq || disposed) return;
+        slice = performance.now();
+      }
+      if (step.done) break;
+      if (built && !reveal && performance.now() - slice > SLICE_MS) {
+        longest = Math.max(longest, performance.now() - slice);
+        work += performance.now() - slice;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (mine !== seq || disposed) return;
+        slice = performance.now();
+      }
+      step = steps.next();
+    }
+    if (building === mine) {
+      building = 0;
+      const touched = heldTouch;
+      heldTouch = null;
+      // A link change made meanwhile that reaches this model's notes (by their old links or
+      // their new ones): build again from the links as they now are.
+      if (touched?.size && localLinksMatter(touched, step.value.next.index, false, cfg.hideUnresolved, (path) => linkEntryOf(ws.vault.links, path), (path) => linkEntryOf(read, path))) {
+        source.forget();
+        scheduleRebuild();
+        return;
+      }
+    }
+    const installing = performance.now();
+    // A new layout graph goes in between ticks: the next frame puts it in once the tick under
+    // way ends (review 4). Anything else goes in now.
+    if (step.value.graph && (sim.ticking || devHold?.())) {
+      waiting = step.value;
+      waitingChecked = checked;
+      invalidate();
+    } else install(step.value);
+    devBuilt?.(work + performance.now() - slice, performance.now() - started, Math.max(longest, performance.now() - slice), performance.now() - installing);
   }
 
-  function setModel(next: GraphModel, groups: ColorRule[]) {
-    const sig = next.nodes.map((n) => n.id).join("\n") + "\n" + next.links.map((l) => `${l.source},${l.target}`).join(" ");
-    const changed = sig !== signature;
+  /** A model made ready for the screen by `prepare`, for `install`. */
+  interface Prepared {
+    next: GraphModel;
+    groups: ColorRule[];
+    radius: Float64Array<ArrayBuffer>;
+    adjStart: Int32Array<ArrayBuffer>;
+    adj: Int32Array<ArrayBuffer>;
+    colorOf: Int16Array<ArrayBuffer>;
+    order: Int32Array<ArrayBuffer>;
+    /** The layout's new graph, when the nodes or links differ from the shown ones. */
+    graph: SimGraph | null;
+    known: number;
+  }
+
+  /**
+   * Everything a new model needs on screen that does not depend on where the shown
+   * nodes are now, in steps, without touching what is shown (review 3).
+   */
+  function* prepare(next: GraphModel, groups: ColorRule[]): Generator<void, Prepared> {
     const prev = model;
-    model = next;
+    const changed = relayout || !(yield* sameShape(prev, next));
     const n = next.nodes.length;
-    radius = new Float64Array(n);
-    for (let i = 0; i < n; i++) radius[i] = nodeRadius(next.nodes[i].weight);
-    ({ start: adjStart, adj } = neighbours(n, next.links)); // for hover
-    highlighted = new Uint8Array(n);
-    applyColors(groups);
+    const radius = new Float64Array(n);
+    const colorOf = new Int16Array(n);
+    // Each node's colour: its group's (the first that matches), else by kind (nodeColor).
+    for (let i = 0; i < n; i++) {
+      if ((i & 1023) === 1023) yield;
+      radius[i] = nodeRadius(next.nodes[i].weight);
+      colorOf[i] = nodeColor(next.nodes[i], groups);
+    }
+    const { start, adj } = yield* neighbourSteps(n, next.links); // for hover
+    // Draw order: by colour, so each colour is one path (each colour's nodes in index order,
+    // as the stable sort by colour this replaces gave).
+    const order = drawOrder(colorOf);
+    let graph: SimGraph | null = null;
+    let known = 0;
     if (changed) {
-      signature = sig;
-      const ox = sim.x;
-      const oy = sim.y;
-      const ovx = sim.vx;
-      const ovy = sim.vy;
       const saved = !local ? layouts.get(ws.vault.path) : undefined;
-      let known = 0;
-      sim.setGraph(
+      const shown = sim.x.length;
+      graph = yield* sim.prepareGraph(
         next.nodes.map((node) => node.id),
         next.links,
         (id) => {
           const i = prev.index.get(id);
-          if (i !== undefined && i < ox.length) {
+          if (i !== undefined && i < shown) {
             known++;
-            return [ox[i], oy[i], ovx[i], ovy[i]];
+            return i;
           }
           const p = saved?.get(id);
           if (p) known++;
           return p ? [p[0], p[1], 0, 0] : undefined;
         },
       );
+    }
+    return { next, groups, radius, adjStart: start, adj, colorOf, order, graph, known };
+  }
+
+  /** Show a prepared model. The layout's nodes keep their current places. */
+  function install(p: Prepared) {
+    const { next, groups, graph } = p;
+    model = next;
+    const n = next.nodes.length;
+    radius = p.radius;
+    adjStart = p.adjStart;
+    adj = p.adj;
+    highlighted = new Uint8Array(n);
+    applyPalette(groups);
+    colorOf = p.colorOf;
+    order = p.order;
+    if (graph) {
+      relayout = false;
+      sim.installGraph(graph);
       // A first build from scratch starts hot; one that mostly knows where
       // things are (a reopened graph, an edit) only warms up a little.
-      if (!built) sim.alpha = n && known / n > 0.9 ? 0.3 : 1;
+      if (!built) sim.alpha = n && p.known / n > 0.9 ? 0.3 : 1;
       else sim.reheat(reveal ? 0.5 : 0.3);
       hovered = shownHover = -1;
     }
@@ -217,17 +344,12 @@ export function createGraphView(host: GraphHost) {
     invalidate();
   }
 
-  /** Each node's colour: its group's (the first that matches), else by kind (nodeColor). */
-  function applyColors(groups: ColorRule[]) {
+  function applyPalette(groups: ColorRule[]) {
     const c = colors ?? readColors();
     palette = [c.node, c.unresolved, c.tag, c.attachment, ...groups.map((g) => `#${g.rgb.toString(16).padStart(6, "0")}`)];
     paletteAlpha = [1, 0.5, 1, 1, ...groups.map(() => 1)];
-    const n = model.nodes.length;
-    colorOf = new Int16Array(n);
-    model.nodes.forEach((node, i) => (colorOf[i] = nodeColor(node, groups)));
-    // Draw order: by colour, so each colour is one path.
-    order = Int32Array.from({ length: n }, (_, i) => i).sort((a, b) => colorOf[a] - colorOf[b]);
   }
+
 
   function readColors(): Colors {
     const read = readGraphColors(el);
@@ -240,6 +362,17 @@ export function createGraphView(host: GraphHost) {
 
   function scheduleRebuild(delay = REFRESH_DELAY) {
     stale = true;
+    // A model still waiting to go in is older than what asked for this rebuild: drop it, and
+    // the shown one stays up until the rebuild is done (review 5). So is one still being built
+    // (review 6): it stops at its next slice instead of going in, and (review 7) no longer
+    // counts as under way for `linksMatter`. A first build still finishes, so a new graph is
+    // never left empty.
+    waiting = null;
+    if (built) {
+      seq++;
+      building = 0;
+      heldTouch = null;
+    }
     clearTimeout(refreshTimer);
     if (active) refreshTimer = window.setTimeout(() => void rebuild(), delay);
   }
@@ -257,8 +390,9 @@ export function createGraphView(host: GraphHost) {
     frame = 0;
     // Nobody is touching the graph and someone is typing: let the editor have
     // the frames, and carry on settling once the typing pauses. (A graph
-    // whose nodes aren't on screen yet is drawn first.)
-    if (!input.drag && !input.panning && cam.zoomAt === null && drawnModel === model && started - lastKey < TYPING_PAUSE) {
+    // whose nodes aren't on screen yet is drawn first, one waiting for the
+    // tick under way included.)
+    if (!input.drag && !input.panning && cam.zoomAt === null && drawnModel === model && !waiting && started - lastKey < TYPING_PAUSE) {
       lastFrame = 0;
       clearTimeout(typingWait);
       typingWait = window.setTimeout(invalidate, TYPING_PAUSE - (started - lastKey) + 10);
@@ -268,11 +402,17 @@ export function createGraphView(host: GraphHost) {
     lastFrame = now;
     let more = false;
     if (reveal) more = advanceTimelapse() || more;
-    if (!sim.settled) {
-      sim.tick();
+    if (!sim.settled || sim.ticking) {
+      if (sim.advance(started + TICK_MS) && sim.settled) rememberLayout();
       more = true;
-      if (sim.settled) rememberLayout();
     }
+    // A new graph waits for the tick under way (its nodes move when it ends).
+    if (waiting && !sim.ticking && !devHold?.()) {
+      const p = waiting;
+      waiting = null;
+      install(p);
+      more = true;
+    } else if (waiting) more = true;
     // Zoom eases to its target around the point it was aimed at.
     if (cam.scale !== cam.target) {
       easeZoom(cam, dt, duration("fast") <= 0);
@@ -331,6 +471,11 @@ export function createGraphView(host: GraphHost) {
 
   function draw() {
     if (!cam.width || !cam.height) return;
+    // A node dragged during a tick in steps is drawn where it was put (`Simulation.place`).
+    sim.showing(drawNow);
+  }
+
+  function drawNow() {
     const c = colors ?? readColors();
     drawnModel = model;
     drawGraph(ctx, {
@@ -365,7 +510,7 @@ export function createGraphView(host: GraphHost) {
   // ----- hit testing and hover -----
 
   /** The node under a point (canvas pixels), or -1. */
-  const nodeAt = (px: number, py: number) => hitTest(cam, px, py, sim.x, sim.y, radius, cfg.nodeSizeMultiplier);
+  const nodeAt = (px: number, py: number) => sim.showing(() => hitTest(cam, px, py, sim.x, sim.y, radius, cfg.nodeSizeMultiplier));
 
   function setHover(i: number) {
     if (i === hovered) return;
@@ -391,7 +536,8 @@ export function createGraphView(host: GraphHost) {
         sim.alphaTarget = 0.3;
         sim.reheat(0.3);
       }
-      [sim.x[i], sim.y[i]] = toWorld(cam, x, y);
+      const [wx, wy] = toWorld(cam, x, y);
+      sim.place(i, wx, wy);
       invalidate();
     },
     dropNode(i) {
@@ -444,7 +590,7 @@ export function createGraphView(host: GraphHost) {
     const paths = ws.vault.files.filter((f) => !f.is_dir).map((f) => f.path);
     paths.sort((a, b) => (mtime.get(a) ?? 0) - (mtime.get(b) ?? 0) || a.localeCompare(b));
     reveal = { order: paths, shown: 0, perFrame: Math.max(1, Math.ceil(paths.length / 240)) };
-    signature = "";
+    relayout = true;
     sim.alpha = 1;
     invalidate();
   }
@@ -540,9 +686,37 @@ export function createGraphView(host: GraphHost) {
   }
   applyForces();
 
+  /** Whether a link refresh that changed `touched` notes' entries can change this graph (`localLinksMatter`). */
+  function linksMatter(touched: ReadonlySet<string> | null): boolean {
+    // A rebuild in flight read older links than these: judge nothing against the old model.
+    // Nor while a rebuilt model waits to go in (review 5): it was built from links before these,
+    // and the shown model says nothing about the notes it adds.
+    // Review 8: a model that was checked when its build was done is judged instead of the shown
+    // one, since it is what goes in.
+    if (building !== 0 || (waiting && !waitingChecked)) return true;
+    const { links, linkPrev } = ws.vault;
+    return localLinksMatter(
+      touched,
+      local ? (waiting?.next ?? model).index : null,
+      source.readsText(cfg),
+      cfg.hideUnresolved,
+      (path) => linkEntryOf(links, path),
+      (path) => linkEntryOf(linkPrev, path),
+    );
+  }
+
   // The vault changed (a moment after a save, never on a keystroke): update in place.
   const onChange = (change: string) => {
     if (disposed) return;
+    if (change === "links") {
+      const touched = ws.vault.linkTouch;
+      if (building !== 0 && heldTouch && touched) {
+        // Review 8: checked against the build under way's model when it is done (`rebuild`).
+        for (const path of touched) heldTouch.add(path);
+        return;
+      }
+      if (!linksMatter(touched)) return;
+    }
     if (change === "links" || change === "files") {
       source.forget();
       scheduleRebuild();

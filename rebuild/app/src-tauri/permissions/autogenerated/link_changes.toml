@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-link-changes"
+description = "Enables the link_changes command without any pre-configured scope."
+commands.allow = ["link_changes"]
+
+[[permission]]
+identifier = "deny-link-changes"
+description = "Denies the link_changes command without any pre-configured scope."
+commands.deny = ["link_changes"]

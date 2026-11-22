@@ -67,6 +67,7 @@ impl Index {
             legacy_winners(&self.files),
             "winners vs the pre-P2a rebuild"
         );
+        self.assert_links_match_walk();
     }
 
     /// The same nodes with maps from one full rebuild.
@@ -81,7 +82,7 @@ impl Index {
 }
 
 /// xorshift64*: deterministic, no crates.
-struct Rng(u64);
+pub(super) struct Rng(pub(super) u64);
 
 impl Rng {
     fn next(&mut self) -> u64 {
@@ -90,10 +91,10 @@ impl Rng {
         self.0 ^= self.0 >> 27;
         self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
     }
-    fn below(&mut self, n: usize) -> usize {
+    pub(super) fn below(&mut self, n: usize) -> usize {
         (self.next() % n as u64) as usize
     }
-    fn pick<'a>(&mut self, items: &'a [&'a str]) -> &'a str {
+    pub(super) fn pick<'a>(&mut self, items: &'a [&'a str]) -> &'a str {
         items[self.below(items.len())]
     }
 }
@@ -117,7 +118,7 @@ const PROBES: [&str; 14] = [
     "er/x/b", ".md", "é", "i̇", "A/NOTE.MD",
 ];
 
-fn random_path(rng: &mut Rng) -> String {
+pub(super) fn random_path(rng: &mut Rng) -> String {
     let folder = rng.pick(&FOLDERS);
     let file = format!("{}{}", rng.pick(&NAMES), rng.pick(&EXTS));
     if folder.is_empty() {
@@ -141,7 +142,7 @@ fn random_content(rng: &mut Rng) -> String {
 }
 
 /// An indexed path (file or folder) most of the time, otherwise a fresh one.
-fn some_path(rng: &mut Rng, idx: &Index) -> String {
+pub(super) fn some_path(rng: &mut Rng, idx: &Index) -> String {
     let known: Vec<&String> = idx.files.keys().collect();
     if !known.is_empty() && rng.below(4) != 0 {
         known[rng.below(known.len())].clone()

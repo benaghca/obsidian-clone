@@ -4,7 +4,7 @@ import { compareNames, isNoteFile, noteName, parentDir } from "../paths";
 import { parseDate } from "./dates";
 import { expression, isFormulaError, testExpression, type Context, type Expression, type Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
-import { parseGroupBy } from "./groups";
+import { parseGroupBy, sortWork } from "./groups";
 import { parseSummaryPlan } from "./summaries";
 export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean; /** The note `this` reads: the one a base is embedded in, or the base file in its own tab. */ host?: Row }
 
@@ -55,6 +55,30 @@ function compareKeys(a: SortKey, b: SortKey): number {
   if (a.dateLike && b.dateLike) return a.time !== undefined && b.time !== undefined ? a.time - b.time : x! < y! ? -1 : x! > y! ? 1 : 0;
   return compareNames(a.text, b.text);
 }
+/**
+ * Whether `compareKeys` orders sort column `i` of these rows as a total preorder, checked in
+ * steps. Then every stable sort gives one order, the one `Array.prototype.sort` gives, and the
+ * stepped merge sort may run. A column that mixes kinds compares some pairs as numbers or
+ * times and others as text, which can go round in a cycle (-2 < "-3" < -10 < -2): there only
+ * the engine's own sort gives the order the table always had (review 4).
+ */
+function* orderedWork(keyed: readonly { keys: SortKey[] }[], i: number): Generator<void, boolean> {
+  let numbers = 0, nan = false, dates = 0, timed = 0, other = 0;
+  for (let at = 0; at < keyed.length; at++) {
+    if ((at & 4095) === 4095) yield;
+    const key = keyed[at].keys[i];
+    if (key.missing) continue;
+    if (typeof key.value === "number") { numbers++; nan ||= Number.isNaN(key.value); }
+    else if (key.dateLike) { dates++; if (key.time !== undefined && Number.isFinite(key.time)) timed++; }
+    else other++;
+  }
+  // Only numbers: by value (NaN equals everything, so it is out).
+  if (!dates && !other) return !nan;
+  // Only dates: all by time, or all as written.
+  if (!numbers && !other) return timed === 0 || timed === dates;
+  // Otherwise every pair must compare as text: no two numbers and no two dates.
+  return numbers <= 1 && dates <= 1;
+}
 /** Cinder's board is the same layout Grove stores as `kanban`. Any other unknown name draws as a table. */
 export function layoutOf(type: unknown): "table" | "cards" | "list" | "kanban" {
   if (type === "cards" || type === "list" || type === "kanban") return type;
@@ -88,9 +112,11 @@ export function baseModel(source: string, viewIndex = 0) {
   const view = mapping(first);
   if (view.type != null && view.type !== "table" && view.type !== "cards" && view.type !== "kanban" && view.type !== "list" && view.type !== "board") notices.add("This layout isn't supported yet");
   const groupBy = parseGroupBy(view.groupBy, notices), summaryPlan = parseSummaryPlan(root.summaries, view.summaries, notices);
+  // Every compiled filter and formula, for `reads`.
+  const compiled: Expression[] = [];
   const compile = (source: Yaml | undefined): Expression => {
     if (typeof source !== "string") { notices.add(`Unsupported expression: ${String(source)}`); return () => null; }
-    try { return expression(source); } catch { notices.add(`Unsupported expression: ${source}`); return () => null; }
+    try { const e = expression(source); compiled.push(e); return e; } catch { notices.add(`Unsupported expression: ${source}`); return () => null; }
   };
   const tree = (filter: Yaml | undefined): Expression => {
     if (filter == null) return () => true;
@@ -152,22 +178,61 @@ export function baseModel(source: string, viewIndex = 0) {
     const config = mapping(mapping(root.properties)[canonical(key)] ?? mapping(root.properties)[key] ?? mapping(root.properties)[noteKey(key)]);
     return typeof config.displayName === "string" ? config.displayName : (key.startsWith("file.") ? FILE_LABELS[key] : undefined) ?? key.replace(/^(note|formula)\./, "");
   };
-  function select(rows: Row[], unlimited = false) {
-    const found = rows.map(row => ({ row, context: context(row) })).filter(r => testExpression(global, r.context) && testExpression(local, r.context));
+  type Keyed = { r: { row: Row; context: Context }; keys: ReturnType<typeof sortKey>[]; name: string };
+  const byKeys = (a: Keyed, b: Keyed) => {
+    for (let i = 0; i < sorts.length; i++) {
+      const x = a.keys[i], y = b.keys[i];
+      // Empties go last in either direction.
+      if (x.missing !== y.missing) return x.missing ? 1 : -1;
+      const diff = compareKeys(x, y);
+      if (diff) return diff * sorts[i].direction;
+    }
+    return compareNames(a.name, b.name) || compareNames(a.r.row.file.path, b.r.row.file.path);
+  };
+  /**
+   * `select` in steps: it pauses (yields) every few hundred rows and through the sort, a
+   * stable merge sort (`sortWork`) that orders as `Array.prototype.sort` does (review 3: a
+   * Base reading links re-selected every row in one task after a link change). That holds
+   * when the sort columns order consistently (`orderedWork`); a column mixing kinds is sorted
+   * by `Array.prototype.sort` itself, in one task, as it always was (review 4).
+   */
+  function* selectWork(rows: readonly Row[], unlimited = false) {
+    const found: { row: Row; context: Context }[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = { row: rows[i], context: context(rows[i]) };
+      if (testExpression(global, r.context) && testExpression(local, r.context)) found.push(r);
+      if ((i & 127) === 127) yield;
+    }
     // Each row's sort values are read and parsed once, not on every comparison.
-    const keyed = found.map(r => ({ r, keys: sorts.map(sort => sortKey(r.context.get(sort.property))), name: noteName(r.row.file.path) }));
-    keyed.sort((a, b) => {
-      for (let i = 0; i < sorts.length; i++) {
-        const x = a.keys[i], y = b.keys[i];
-        // Empties go last in either direction.
-        if (x.missing !== y.missing) return x.missing ? 1 : -1;
-        const diff = compareKeys(x, y);
-        if (diff) return diff * sorts[i].direction;
-      }
-      return compareNames(a.name, b.name) || compareNames(a.r.row.file.path, b.r.row.file.path);
-    });
-    const sorted = keyed.map(k => k.r);
+    const keyed: Keyed[] = [];
+    for (let i = 0; i < found.length; i++) {
+      const r = found[i];
+      keyed.push({ r, keys: sorts.map(sort => sortKey(r.context.get(sort.property))), name: noteName(r.row.file.path) });
+      if ((i & 255) === 255) yield;
+    }
+    let consistent = true;
+    for (let i = 0; i < sorts.length && consistent; i++) consistent = yield* orderedWork(keyed, i);
+    const sorted = (consistent ? yield* sortWork(keyed, byKeys) : keyed.sort(byKeys)).map(k => k.r);
     return !unlimited && typeof view.limit === "number" ? sorted.slice(0, view.limit) : sorted;
+  }
+  function select(rows: Row[], unlimited = false) {
+    const work = selectWork(rows, unlimited);
+    for (;;) {
+      const step = work.next();
+      if (step.done) return step.value;
+    }
+  }
+  // What rows can read beyond their own text and properties (review 2): from the compiled
+  // filters, formulas and custom summaries, and from the keys shown, sorted, or grouped by.
+  // An expression without `reads` counts as reading both.
+  const reads = { links: false, tags: false };
+  for (const e of [...compiled, ...summaryPlan.custom.values()]) {
+    reads.links ||= e.reads?.links ?? true;
+    reads.tags ||= e.reads?.tags ?? true;
+  }
+  for (const key of [...columns, ...sorts.map(s => s.property), ...(groupBy ? [groupBy.property] : [])].map(canonical)) {
+    if (/^file\.(?:links|backlinks|embeds)$/.test(key)) reads.links = true;
+    if (key === "file.tags") reads.tags = true;
   }
   const type = layoutOf(view.type);
   const listMarkers = type === "list" ? parseListMarkers(view.markers ?? view.marker ?? view.listMarkers, notices) : "bullets";
@@ -178,5 +243,5 @@ export function baseModel(source: string, viewIndex = 0) {
   const rawImage = view.image ?? view.cover ?? view.imageProperty, image = typeof rawImage === "string" && rawImage.trim() ? rawImage.trim() : null;
   const imageFit: "cover" | "contain" = (view.imageFit ?? view.coverFit) === "contain" ? "contain" : "cover";
   const rawRatio = view.imageAspectRatio ?? view.aspectRatio ?? view.coverAspectRatio, imageAspectRatio = typeof rawRatio === "number" && Number.isFinite(rawRatio) && rawRatio > 0 ? Math.max(0.2, Math.min(3, rawRatio)) : 0.5;
-  return { context, groupBy, summaryPlan, type, listMarkers, listSeparator, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices, hostContext };
+  return { context, groupBy, summaryPlan, type, listMarkers, listSeparator, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, selectWork, notices, hostContext, reads: Object.freeze(reads) };
 }

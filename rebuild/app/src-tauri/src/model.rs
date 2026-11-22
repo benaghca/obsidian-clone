@@ -67,6 +67,33 @@ pub struct LinkIndex {
     pub unresolved: BTreeMap<String, Vec<String>>,
 }
 
+/// One note's part of the link index. An empty list is left out of the JSON, and a note with
+/// all three empty has no links (it is left out of every `LinkIndex` map).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct LinkEntry {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub outgoing: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub markdown: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unresolved: Vec<String>,
+}
+
+/// The link index since a version the page already holds (`link_changes`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LinkChanges {
+    /// This index's history. A page holding another id (another vault, or a reopen) gets `full`.
+    pub id: u64,
+    /// The version this reply brings the page to.
+    pub version: u64,
+    /// The version the page asked from; `changed` is relative to it. Absent with `full`.
+    pub since: Option<u64>,
+    /// The whole index, when the page held none, held another id, or is too far behind.
+    pub full: Option<LinkIndex>,
+    /// Every note whose entry changed since `since`, with its whole new entry. Empty when `full`.
+    pub changed: BTreeMap<String, LinkEntry>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChangeKind {

@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import type { LinkIndex } from "../api";
 import { GRAPH, LOCAL_GRAPH, sanitize, serialize, defaults } from "../settings/schema";
-import { buildGraph, graphFileLists, type GraphModel, neighbours, nodeColor, nodeRadius } from "./data";
+import { buildGraph, buildGraphSteps, drawOrder, graphFileLists, type GraphModel, localLinksMatter, neighbours, nodeColor, nodeRadius, sameShape } from "./data";
+import { linkEntryOf } from "../links/linkDelta";
 import { matches, parseQuery } from "../shell/searchQuery";
 import { ALPHA_MIN, Simulation } from "./sim";
 
@@ -152,6 +153,80 @@ test("an update keeps nodes where they were and places a new one by its neighbou
   expect(Math.hypot(sim.x[2] - bx, sim.y[2] - by)).toBeLessThan(100);
 });
 
+test("a graph prepared in steps and installed later equals one set at install time", () => {
+  // Review 3: `prepareGraph` runs while the shown layout keeps moving; `installGraph` reads
+  // the kept nodes' places then. The result equals `setGraph` called at that moment.
+  const start = () => {
+    const sim = new Simulation();
+    sim.setGraph(["a", "b", "c"], [{ source: 0, target: 1 }, { source: 1, target: 2 }], () => undefined);
+    for (let i = 0; i < 50; i++) sim.tick();
+    return sim;
+  };
+  const ids = ["b", "x", "a", "y", "z", "c"];
+  const links = [{ source: 2, target: 0 }, { source: 1, target: 0 }, { source: 3, target: 1 }, { source: 4, target: 5 }];
+  const old = new Map([["a", 0], ["b", 1], ["c", 2]]);
+  const later = start();
+  const steps = later.prepareGraph(ids, links, (id) => old.get(id));
+  let step = steps.next();
+  for (let i = 0; i < 40; i++) later.tick();
+  while (!step.done) step = steps.next();
+  later.installGraph(step.value);
+  const now = start();
+  for (let i = 0; i < 40; i++) now.tick();
+  now.setGraph(ids, links, (id) => {
+    const i = old.get(id);
+    return i === undefined ? undefined : [now.x[i], now.y[i], now.vx[i], now.vy[i]];
+  });
+  expect([Array.from(later.x), Array.from(later.y), Array.from(later.vx)]).toEqual([Array.from(now.x), Array.from(now.y), Array.from(now.vx)]);
+});
+
+test("draw order and the shape check equal what they replace", () => {
+  let x = 99;
+  const r = (n: number) => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) % n; };
+  for (let round = 0; round < 200; round++) {
+    const colorOf = Int16Array.from({ length: r(300) }, () => r(7));
+    const sorted = Int32Array.from({ length: colorOf.length }, (_, i) => i).sort((a, b) => colorOf[a] - colorOf[b]);
+    expect(Array.from(drawOrder(colorOf))).toEqual(Array.from(sorted));
+  }
+  const sig = (m: GraphModel) => m.nodes.map((n) => n.id).join("\n") + "\n" + m.links.map((l) => `${l.source},${l.target}`).join(" ");
+  const run = (a: GraphModel, b: GraphModel) => { const s = sameShape(a, b); for (;;) { const step = s.next(); if (step.done) return step.value; } };
+  const one = buildGraph({ notes, attachments: [], links: index }, base);
+  const variants = [
+    one,
+    buildGraph({ notes, attachments: [], links: index }, base),
+    buildGraph({ notes, attachments: [], links: index }, { ...base, hideUnresolved: true }),
+    buildGraph({ notes: [...notes, "New.md"], attachments: [], links: index }, base),
+    buildGraph({ notes, attachments: [], links: links({ ...index.outgoing, "C.md": ["A.md"] }, { markdown: index.markdown, unresolved: index.unresolved }) }, base),
+  ];
+  for (const a of variants) for (const b of variants) expect(run(a, b)).toBe(sig(a) === sig(b));
+});
+
+test("every phase of a build pauses: no step handles more than a few thousand notes or links", () => {
+  // Review 3: the last passes (keeping nodes, mapping links, the id index) and the local
+  // graph's walk pause too. 30,000 notes in a ring, with a missing note each.
+  const many = Array.from({ length: 30_000 }, (_, i) => `n${i}.md`);
+  const outgoing: Record<string, string[]> = {};
+  const unresolved: Record<string, string[]> = {};
+  many.forEach((p, i) => { outgoing[p] = [many[(i + 1) % many.length]!]; unresolved[p] = [`gone ${i}`]; });
+  const local = { ...base, local: { center: "n0.md", depth: 5, incoming: true, outgoing: true, neighbors: true } };
+  // Each twice: the second run is the one that counts (the first warms the JIT up).
+  for (const opts of [base, base, local, local]) {
+    const steps = buildGraphSteps({ notes: many, attachments: [], links: links(outgoing, { unresolved }) }, opts);
+    let longest = 0, pauses = 0;
+    for (;;) {
+      const started = performance.now();
+      const step = steps.next();
+      longest = Math.max(longest, performance.now() - started);
+      if (step.done) break;
+      pauses++;
+    }
+    console.log(`${opts === base ? "global" : "local"} build of 30,000 notes: ${pauses} pauses, longest step ${longest.toFixed(1)} ms`);
+    // Listing notes, their links, the two-way pairs, kept nodes, mapped links and the index:
+    // each pauses every 1,024 (60,000 nodes with the missing notes, 60,000 links).
+    expect(pauses).toBeGreaterThan((30_000 + 30_000 + 4 * 60_000) / 1024 - 6);
+  }
+});
+
 test("the repel force with Barnes-Hut stays close to the exact sum", () => {
   // Two far clusters: approximations of the far cluster must push the right way.
   const ids = Array.from({ length: 60 }, (_, i) => `n${i}`);
@@ -185,4 +260,158 @@ test("neighbour lists hold each link at both ends", () => {
   ]);
   const of = (i: number) => [...adj.slice(start[i], start[i + 1])].sort();
   expect([of(0), of(1), of(2), of(3)]).toEqual([[1, 2], [0], [0], []]);
+});
+
+// Review 2: the refresh guard for a local graph.
+// Labels too: a missing note's label is the first linking note's spelling (review 3).
+const shape = (m: GraphModel) => JSON.stringify([m.nodes.map((n) => [n.id, n.label, n.kind, n.weight]), m.links.map((l) => [l.source, l.target, l.both])]);
+
+test("a local graph rebuilds when a note outside it links to a missing note it shows", () => {
+  const notes = ["A.md", "B.md", "C.md"];
+  const before = links({}, { unresolved: { "A.md": ["Missing"] } });
+  const opts = { ...base, local: { center: "A.md", depth: 2, incoming: true, outgoing: true, neighbors: false } };
+  const shown = buildGraph({ notes, attachments: [], links: before }, opts);
+  expect(labels(shown)).toEqual(["A", "Missing"]);
+  // B (already a note, no file-list change) now links to [[missing]].
+  const after = links({}, { unresolved: { "A.md": ["Missing"], "B.md": ["missing"] } });
+  const touched = new Set(["B.md"]);
+  expect(localLinksMatter(touched, shown.index, false, false, (p) => linkEntryOf(after, p), (p) => linkEntryOf(before, p))).toBe(true);
+  expect(labels(buildGraph({ notes, attachments: [], links: after }, opts))).toEqual(["A", "B", "Missing"]);
+  // With missing notes hidden the graph has no such node, and nothing changes.
+  const hidden = { ...opts, hideUnresolved: true };
+  const plain = buildGraph({ notes, attachments: [], links: before }, hidden);
+  expect(localLinksMatter(touched, plain.index, false, true, (p) => linkEntryOf(after, p), (p) => linkEntryOf(before, p))).toBe(false);
+  expect(shape(buildGraph({ notes, attachments: [], links: after }, hidden))).toBe(shape(plain));
+});
+
+test("a local graph rebuilds when an existing note outside it drops the first spelling of a missing note it shows", () => {
+  // Z (the centre) links [[missing]]; A, earlier in path order and outside the depth-1
+  // graph, links [[Missing]]. The node takes A's spelling, since A is visited first.
+  const notes = ["A.md", "Q.md", "Z.md"];
+  const before = links({ "A.md": ["Q.md"] }, { unresolved: { "A.md": ["Missing"], "Z.md": ["missing"] } });
+  const opts = { ...base, local: { center: "Z.md", depth: 1, incoming: true, outgoing: true, neighbors: false } };
+  const shown = buildGraph({ notes, attachments: [], links: before }, opts);
+  expect(labels(shown)).toEqual(["Missing", "Z"]);
+  expect(shown.index.has("A.md")).toBe(false);
+  // A is saved without that link: the fresh graph labels the node with Z's spelling.
+  const after = links({ "A.md": ["Q.md"] }, { unresolved: { "Z.md": ["missing"] } });
+  expect(labels(buildGraph({ notes, attachments: [], links: after }, opts))).toEqual(["Z", "missing"]);
+  const touched = new Set(["A.md"]);
+  expect(localLinksMatter(touched, shown.index, false, false, (p) => linkEntryOf(after, p), (p) => linkEntryOf(before, p))).toBe(true);
+  // Judged on the new entries alone, it would have been skipped.
+  expect(localLinksMatter(touched, shown.index, false, false, (p) => linkEntryOf(after, p), (p) => linkEntryOf(after, p))).toBe(false);
+});
+
+test("whenever the guard skips a refresh, a fresh local graph equals the one shown", () => {
+  let x = 12345;
+  const r = (n: number) => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) % n; };
+  const notes = ["A.md", "B.md", "C.md", "D.md", "E.md", "F.md", "G.md", "H.md"];
+  const missing = ["Missing", "missing", "Other"];
+  const entry = () => ({
+    outgoing: Array.from({ length: r(3) }, () => notes[r(notes.length)]!),
+    markdown: r(4) ? [] : [notes[r(notes.length)]!],
+    unresolved: Array.from({ length: r(2) }, () => missing[r(missing.length)]!),
+  });
+  const toIndex = (all: Map<string, ReturnType<typeof entry>>): LinkIndex => {
+    const out: LinkIndex = { outgoing: {}, markdown: {}, unresolved: {} };
+    for (const [path, e] of all) for (const f of ["outgoing", "markdown", "unresolved"] as const) if (e[f].length) out[f]![path] = [...new Set(e[f])];
+    return out;
+  };
+  let skipped = 0;
+  for (let round = 0; round < 2000; round++) {
+    const all = new Map(notes.filter(() => r(3)).map((p) => [p, entry()]));
+    const opts = { ...base, hideUnresolved: r(2) === 0, local: { center: notes[r(notes.length)]!, depth: 1 + r(3), incoming: r(3) > 0, outgoing: r(3) > 0, neighbors: r(2) === 0 } };
+    const before = toIndex(all);
+    const shown = buildGraph({ notes, attachments: [], links: before }, opts);
+    const changed = notes[r(notes.length)]!;
+    if (r(4)) all.set(changed, entry()); else all.delete(changed);
+    const after = toIndex(all);
+    if (localLinksMatter(new Set([changed]), shown.index, false, opts.hideUnresolved, (p) => linkEntryOf(after, p), (p) => linkEntryOf(before, p))) continue;
+    skipped++;
+    expect(shape(buildGraph({ notes, attachments: [], links: after }, opts)), `round ${round}`).toBe(shape(shown));
+  }
+  expect(skipped).toBeGreaterThan(100);
+});
+
+// Review 5: a drag during a tick in steps. Node 10 is fixed and moved after the quadtree has
+// taken it in (mid-build) and again during the repulsion pass. The tick goes on from positions
+// as they were when it began, and the node goes to the last place when it ends: the same as a
+// whole tick with the node held, then the move. Meanwhile drawing (`showing`) sees it there.
+test("a drag during a tick in steps lands at the tick's end, as between whole ticks", () => {
+  const ids = Array.from({ length: 5000 }, (_, i) => `n${i}`);
+  const links = Array.from({ length: 4500 }, (_, i) => ({ source: i % 5000, target: (i * 7 + 3) % 5000 }));
+  const whole = new Simulation();
+  const stepped = new Simulation();
+  for (const sim of [whole, stepped]) sim.setGraph(ids, links, () => undefined);
+  for (let t = 0; t < 3; t++) {
+    whole.tick();
+    while (!stepped.advance(0));
+  }
+  // Steps: the links to 4096, the rest and the tree's first 4096 inserts, the rest of the tree
+  // and 512 nodes' repulsion, ...
+  stepped.advance(0);
+  stepped.advance(0);
+  const before = [stepped.x[10], stepped.y[10]];
+  stepped.fixed[10] = 1;
+  stepped.place(10, 500, -400);
+  expect([stepped.x[10], stepped.y[10]]).toEqual(before);
+  expect(stepped.showing(() => [stepped.x[10], stepped.y[10]])).toEqual([500, -400]);
+  stepped.advance(0);
+  stepped.place(10, 520, -380);
+  expect(stepped.ticking).toBe(true);
+  while (!stepped.advance(0));
+  whole.fixed[10] = 1;
+  whole.tick();
+  whole.place(10, 520, -380);
+  expect([stepped.x[10], stepped.y[10]]).toEqual([520, -380]);
+  expect(Array.from(stepped.x)).toEqual(Array.from(whole.x));
+  expect(Array.from(stepped.vy)).toEqual(Array.from(whole.vy));
+  // And the ticks after it.
+  for (let t = 0; t < 3; t++) {
+    whole.tick();
+    while (!stepped.advance(0));
+  }
+  expect(Array.from(stepped.y)).toEqual(Array.from(whole.y));
+});
+
+// Review 4: a tick taken in steps (`advance`, as the view does at 50k nodes) moves every node
+// exactly as a whole tick does, tick for tick, and nothing moves until its last step. A new
+// graph put in while a tick is under way waits for it to end.
+test("a tick in steps lays out exactly as whole ticks", () => {
+  const ids = Array.from({ length: 3000 }, (_, i) => `n${i}`);
+  const links = Array.from({ length: 4500 }, (_, i) => ({ source: i % 3000, target: (i * 7 + 3) % 3000 }));
+  const whole = new Simulation();
+  const stepped = new Simulation();
+  for (const sim of [whole, stepped]) sim.setGraph(ids, links, () => undefined);
+  let steps = 0;
+  for (let t = 0; t < 12; t++) {
+    whole.tick();
+    const x = Array.from(stepped.x);
+    // A deadline already passed: one step a call.
+    while (!stepped.advance(0)) {
+      steps++;
+      expect(stepped.ticking).toBe(true);
+      if (steps % 7 === 0) expect(Array.from(stepped.x)).toEqual(x);
+    }
+    expect(stepped.ticking).toBe(false);
+    expect(Array.from(stepped.x)).toEqual(Array.from(whole.x));
+    expect(Array.from(stepped.vy)).toEqual(Array.from(whole.vy));
+  }
+  expect(steps).toBeGreaterThan(12 * 5);
+  // Half a tick, then a new graph (one more node): the tick ends first, as it would have.
+  stepped.advance(0);
+  expect(stepped.ticking).toBe(true);
+  whole.tick();
+  const more = [...ids, "late"];
+  const known = (id: string) => (id === "late" ? undefined : ids.indexOf(id));
+  for (const sim of [whole, stepped]) {
+    const steps = sim.prepareGraph(more, links, known);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    sim.installGraph(step.value);
+  }
+  expect(stepped.ticking).toBe(false);
+  whole.tick();
+  stepped.tick();
+  expect(Array.from(stepped.x)).toEqual(Array.from(whole.x));
 });

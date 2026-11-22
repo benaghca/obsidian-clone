@@ -20,7 +20,7 @@
 //! reads the vault. `vault_tags` is the five searches the Tags view made
 //! before step 1; `tags` is the one command it makes now.
 
-use super::{is_note_path, Index};
+use super::{display_name, is_note_path, parents, Index, Stamp};
 use std::path::Path;
 use std::time::Instant;
 
@@ -375,4 +375,447 @@ fn bench_vault() {
         ms_list(&hash_ser_ms),
         median(&hash_ser_ms)
     );
+}
+
+/// Resident and peak memory of this process, in MB (Linux `/proc/self/status`).
+fn rss_mb() -> (f64, f64) {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let field = |name: &str| {
+        status
+            .lines()
+            .find(|l| l.starts_with(name))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|kb| kb.parse::<f64>().ok())
+            .map_or(0.0, |kb| kb / 1024.0)
+    };
+    (field("VmRSS:"), field("VmHWM:"))
+}
+
+/// R2 P2b: what a save and the link refresh after it cost, with the link table, against
+/// the pre-P2b full walk. Same vault as `bench_vault`:
+///
+/// ```text
+/// GROVE_BENCH_VAULT=/tmp/grove-bench-20000 cargo test --release --offline --lib -- --ignored --nocapture bench_link_deltas
+/// ```
+///
+/// `GROVE_BENCH_JSON_DIR` (a temp subdirectory) also writes the full and delta replies for
+/// a page-side comparison (`JSON.parse` of the full reply against `patchLinks`).
+#[test]
+#[ignore]
+fn bench_link_deltas() {
+    use super::link_table_tests::{walked_backlinks, walked_link_index};
+    let root =
+        std::env::var("GROVE_BENCH_VAULT").unwrap_or_else(|_| "/tmp/grove-bench-5000".to_string());
+    let root = Path::new(&root);
+    assert!(root.is_dir(), "bench vault missing at {}", root.display());
+    let mut idx = Index::scan(root).expect("scan");
+    let (rss, peak) = rss_mb();
+    let mut scans = Vec::new();
+    for _ in 0..3 {
+        let started = Instant::now();
+        drop(Index::scan(root).expect("scan"));
+        scans.push(elapsed_ms(started));
+    }
+    println!("GROVE_BENCH vault={} scan_ms={} median={:.1} rss_after_first_scan_mb={rss:.0} peak_mb={peak:.0}", root.display(), ms_list(&scans), median(&scans));
+    let mut maps_ms = Vec::new();
+    let mut links_ms = Vec::new();
+    for _ in 0..3 {
+        let started = Instant::now();
+        idx.maps.refill(&idx.files);
+        maps_ms.push(elapsed_ms(started));
+        let started = Instant::now();
+        idx.rebuild_links();
+        links_ms.push(elapsed_ms(started));
+    }
+    println!("GROVE_BENCH full rebuild: maps_ms={:.1} links_ms={:.1} (links is new in P2b; it replaces the walk each refresh did)", median(&maps_ms), median(&links_ms));
+
+    let runs = 5;
+    let timed = |f: &mut dyn FnMut() -> usize| {
+        let mut samples = Vec::new();
+        let mut bytes = 0;
+        for _ in 0..runs {
+            let started = Instant::now();
+            bytes = f();
+            samples.push(elapsed_ms(started));
+        }
+        (median(&samples), bytes)
+    };
+    let (walk_ms, walk_bytes) = timed(&mut || json_len(&walked_link_index(&idx)));
+    let (full_ms, full_bytes) = timed(&mut || json_len(&idx.link_changes(None)));
+    println!("GROVE_BENCH link_index_walk_ms={walk_ms:.1} json_bytes={walk_bytes} (pre-P2b, every refresh)");
+    println!("GROVE_BENCH link_changes_full_ms={full_ms:.1} json_bytes={full_bytes} (first read)");
+
+    // The most linked note, and one note that links to it.
+    let mut counts: std::collections::HashMap<&String, usize> = std::collections::HashMap::new();
+    let links = idx.link_index();
+    for list in links.outgoing.values() {
+        for t in list {
+            *counts.entry(t).or_default() += 1;
+        }
+    }
+    let (hub, hub_links) = counts.into_iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(a.0))).map(|(p, n)| (p.clone(), n)).unwrap();
+    let source = links.outgoing.iter().find(|(_, t)| t.contains(&hub)).map(|(p, _)| p.clone()).unwrap();
+    let text: String = idx.files.get(&source).unwrap().note.lines.iter().map(|l| format!("{}\n", l.text)).collect();
+    let target_name = display_name(&hub, false);
+    let hub_text: String = idx.files.get(&hub).unwrap().note.lines.iter().map(|l| format!("{}\n", l.text)).collect();
+
+    let one = vec![hub.clone()];
+    let (bl_walk, _) = timed(&mut || json_len(&walked_backlinks(&idx, &one)));
+    let (bl_table, bl_bytes) = timed(&mut || json_len(&idx.backlinks(&one)));
+    println!("GROVE_BENCH backlinks_one walk_ms={bl_walk:.2} table_ms={bl_table:.3} json_bytes={bl_bytes} linkers={hub_links}");
+
+    let json_dir = std::env::var("GROVE_BENCH_JSON_DIR").ok().map(std::path::PathBuf::from);
+    if let Some(dir) = &json_dir {
+        let temp = std::env::temp_dir();
+        assert!(dir.starts_with(&temp) && dir != &temp, "bench JSON must be under a temp subdirectory");
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("links-full.json"), serde_json::to_vec(&idx.link_changes(None)).unwrap()).unwrap();
+    }
+    fn idx_since(idx: &Index) -> (u64, u64) {
+        idx.links.version()
+    }
+
+    // Each case: the save (Rust, under the write lock) and the reply the page reads next.
+    let cases: Vec<(&str, String, String)> = vec![
+        ("typing save, same links", source.clone(), format!("{text}more words\n")),
+        ("save adds a link", source.clone(), format!("{text}[[{target_name}]] [[Nowhere new]]\n")),
+        ("save adds an alias", source.clone(), format!("---\naliases: [bench alias]\n---\n{text}")),
+        ("hub save, same links", hub.clone(), format!("{hub_text}edit\n")),
+    ];
+    for (label, path, body) in cases {
+        let original: String = idx.files.get(&path).unwrap().note.lines.iter().map(|l| format!("{}\n", l.text)).collect();
+        let mut save_ms = Vec::new();
+        let mut reply_ms = Vec::new();
+        let mut reply_bytes = 0;
+        let mut changed = 0;
+        for _ in 0..runs {
+            let base = idx_since(&idx);
+            let started = Instant::now();
+            idx.upsert_note(root, &path, &body, Stamp::sized(body.len()));
+            save_ms.push(elapsed_ms(started));
+            let started = Instant::now();
+            let reply = idx.link_changes(Some(base));
+            reply_bytes = json_len(&reply);
+            reply_ms.push(elapsed_ms(started));
+            changed = reply.changed.len();
+            if let Some(dir) = &json_dir {
+                let name = label.replace([' ', ','], "-");
+                std::fs::write(dir.join(format!("links-delta-{name}.json")), serde_json::to_vec(&reply).unwrap()).unwrap();
+            }
+            idx.upsert_note(root, &path, &original, Stamp::sized(original.len()));
+        }
+        println!(
+            "GROVE_BENCH {label}: save_ms={:.3} link_changes_ms={:.3} json_bytes={reply_bytes} changed_notes={changed}",
+            median(&save_ms),
+            median(&reply_ms)
+        );
+    }
+
+    // Renaming the most linked note: every linker resolves again.
+    let renamed = format!("{hub}-renamed.md");
+    let mut ms = Vec::new();
+    let mut bytes = 0;
+    let mut changed = 0;
+    for _ in 0..runs {
+        let base = idx_since(&idx);
+        let started = Instant::now();
+        idx.relocate(&hub, &renamed);
+        let reply = idx.link_changes(Some(base));
+        bytes = json_len(&reply);
+        ms.push(elapsed_ms(started));
+        changed = reply.changed.len();
+        idx.relocate(&renamed, &hub);
+    }
+    println!("GROVE_BENCH rename hub: relocate_plus_changes_ms={:.3} json_bytes={bytes} changed_notes={changed}", median(&ms));
+
+    // A folder rename: one full map and link rebuild, then a delta of the notes that differ.
+    let folder = parents(&hub).next().unwrap().to_string();
+    let mut ms = Vec::new();
+    for _ in 0..runs {
+        let base = idx_since(&idx);
+        let started = Instant::now();
+        idx.relocate(&folder, "Bench moved");
+        let reply = idx.link_changes(Some(base));
+        bytes = json_len(&reply);
+        ms.push(elapsed_ms(started));
+        changed = reply.changed.len();
+        idx.relocate("Bench moved", &folder);
+    }
+    println!("GROVE_BENCH folder rename ({folder}): relocate_plus_changes_ms={:.1} json_bytes={bytes} changed_notes={changed}", median(&ms));
+
+    // Review 6: the same rename with the app's deferral. The write (one lock hold) rebuilds the
+    // name maps and queues every note; jobs resolve them, a save between their holds.
+    idx.set_defer_links(true);
+    let (mut writes, mut settles, mut holds) = (Vec::new(), Vec::new(), Vec::new());
+    for _ in 0..runs {
+        for (from, to) in [(folder.as_str(), "Bench moved"), ("Bench moved", folder.as_str())] {
+            let started = Instant::now();
+            idx.relocate(from, to);
+            writes.push(elapsed_ms(started));
+            let mut saves = 0;
+            let started = Instant::now();
+            holds.push(settle_by_jobs_with(&mut idx, &mut |idx| {
+                saves += 1;
+                idx.upsert_note(root, "bench-typing.md", &format!("typing {saves}\n"), Stamp::sized(10));
+            }));
+            settles.push(elapsed_ms(started));
+        }
+    }
+    idx.remove_tree("bench-typing.md");
+    // The queueing part of the write alone.
+    let started = Instant::now();
+    idx.links.requeue();
+    let requeue = elapsed_ms(started);
+    settle_by_jobs(&mut idx);
+    idx.set_defer_links(false);
+    println!(
+        "GROVE_BENCH folder rename ({folder}), deferred: write_ms={} (of which marking the sweep {requeue:.3}) settle_ms={} longest_hold_ms={}",
+        ms_list(&writes),
+        ms_list(&settles),
+        ms_list(&holds)
+    );
+
+    // Review 1: one alias read by as many notes as the vault has. Removing it re-resolves
+    // every linker; before the fix each one shifted and scanned lists as long as the vault.
+    let n = idx.files.len();
+    let mut notes: Vec<(String, String)> = (0..n).map(|i| (format!("l/{i:06}.md"), format!("see [[alpha]] here {i}\n"))).collect();
+    let aliased = "---\naliases: [alpha]\n---\nhub\n";
+    notes.push(("hub.md".into(), aliased.into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut fan = Index::from_notes(&refs);
+    let (rebuild_ms, _) = timed(&mut || {
+        fan.rebuild_links();
+        0
+    });
+    let mut remove_ms = Vec::new();
+    let mut add_ms = Vec::new();
+    for _ in 0..runs {
+        let base = idx_since(&fan);
+        let started = Instant::now();
+        fan.upsert_note(root, "hub.md", "hub\n", Stamp::sized(4));
+        remove_ms.push(elapsed_ms(started));
+        changed = fan.link_changes(Some(base)).changed.len();
+        let started = Instant::now();
+        fan.upsert_note(root, "hub.md", aliased, Stamp::sized(aliased.len()));
+        add_ms.push(elapsed_ms(started));
+    }
+    println!(
+        "GROVE_BENCH shared alias, {n} linkers, settled inline: remove_ms={:.1} add_back_ms={:.1} full_link_rebuild_ms={rebuild_ms:.1} changed_notes={changed}",
+        median(&remove_ms),
+        median(&add_ms)
+    );
+    // Review 3, as the app runs it: the save queues the key; off-lock jobs resolve the linkers
+    // (`link_reads::settle`), and a reply is copied in steps. `hold` is the longest step that
+    // holds the lock (a save queued behind them waits for at most that).
+    fan.set_defer_links(true);
+    let (mut save_ms, mut settle_ms, mut hold) = (Vec::new(), Vec::new(), 0f64);
+    for body in ["hub\n", aliased].iter().cycle().take(2 * runs) {
+        let started = Instant::now();
+        fan.upsert_note(root, "hub.md", body, Stamp::sized(body.len()));
+        save_ms.push(elapsed_ms(started));
+        let started = Instant::now();
+        hold = hold.max(settle_by_jobs(&mut fan));
+        settle_ms.push(elapsed_ms(started));
+    }
+    println!(
+        "GROVE_BENCH shared alias, {n} linkers, off-lock jobs: save_ms={:.3} settle_ms={:.1} longest_hold_ms={hold:.2}",
+        median(&save_ms),
+        median(&settle_ms)
+    );
+    let (reply_ms, reply_hold) = reply_by_steps(&fan);
+    println!("GROVE_BENCH whole link_index of {n} notes in steps: total_ms={reply_ms:.1} longest_hold_ms={reply_hold:.3}");
+    // Review 4: `backlinks` of the hub (every note links to it) in steps, with eight of its
+    // sources edited between steps; the reply patches them instead of starting over.
+    settle_by_jobs(&mut fan);
+    let all = Instant::now();
+    let mut reply = super::BacklinkReply::new(&["hub.md".to_string()]);
+    let (mut hold, mut edits) = (0f64, 0);
+    loop {
+        let started = Instant::now();
+        let step = reply.step(&fan);
+        hold = hold.max(elapsed_ms(started));
+        reply.absorb();
+        match step {
+            super::ReplyStep::Done => break,
+            super::ReplyStep::Settle => {
+                hold = hold.max(settle_by_jobs(&mut fan));
+            }
+            super::ReplyStep::More if edits < 8 => {
+                let body = format!("moved down\nsee [[alpha]] edited {edits}\n");
+                fan.upsert_note(root, &format!("l/{:06}.md", edits * (n / 8) + 3), &body, Stamp::sized(body.len()));
+                edits += 1;
+            }
+            super::ReplyStep::More => {}
+        }
+    }
+    let sources = reply.finish()["hub.md"].len();
+    println!("GROVE_BENCH backlinks of hub.md ({sources} lines) in steps, {edits} sources edited between: total_ms={:.1} longest_hold_ms={hold:.3}", elapsed_ms(all));
+
+    // Review 3: a name with many owners, and link-heavy notes.
+    let m = n / 2;
+    let mut notes: Vec<(String, String)> = Vec::new();
+    for i in 0..m {
+        notes.push((format!("r{i:06}/README.md"), "readme\n".into()));
+        notes.push((format!("r{i:06}/n.md"), "see [[README]]\n".into()));
+    }
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut owners = Index::from_notes(&refs);
+    owners.set_defer_links(true);
+    let started = Instant::now();
+    owners.upsert_note(root, "README.md", "top\n", Stamp::sized(4));
+    let save = elapsed_ms(started);
+    let started = Instant::now();
+    let hold = settle_by_jobs(&mut owners);
+    println!("GROVE_BENCH a new README among {m} with {m} readers: save_ms={save:.3} settle_ms={:.1} longest_hold_ms={hold:.2}", elapsed_ms(started));
+    let heavy: String = (0..5_000).map(|j| format!("[[alpha]] [[t{j}]] [x](m{j}.md)\n")).collect();
+    let mut notes: Vec<(String, String)> = (0..100).map(|i| (format!("h/{i:03}.md"), heavy.clone())).collect();
+    notes.push(("hub.md".into(), aliased.into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut heavy = Index::from_notes(&refs);
+    heavy.set_defer_links(true);
+    let started = Instant::now();
+    heavy.upsert_note(root, "hub.md", "hub\n", Stamp::sized(4));
+    let save = elapsed_ms(started);
+    let started = Instant::now();
+    let hold = settle_by_jobs(&mut heavy);
+    println!("GROVE_BENCH 100 notes of 5,000 links reading an alias: save_ms={save:.3} settle_ms={:.1} longest_hold_ms={hold:.2}", elapsed_ms(started));
+
+    // Review 4: one new note of 40,000 links of both kinds (10,000 targets written both ways,
+    // 10,000 missing notes, 10,000 Markdown links to no file): its memberships go in over
+    // several holds. Then it is deleted: its entry goes at once, its memberships in steps.
+    let mut notes: Vec<(String, String)> = (0..10_000).map(|j| (format!("t/{j:05}.md"), "x\n".into())).collect();
+    notes.push(("hub.md".into(), aliased.into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut long = Index::from_notes(&refs);
+    long.set_defer_links(true);
+    let body: String = (0..10_000).map(|j| format!("[[t/{j:05}]] [m](t/{:05}.md) [x](u/{j}.md) [[gone {j}]]\n", (j * 7) % 10_000)).collect();
+    let started = Instant::now();
+    long.upsert_note(root, "long.md", &body, Stamp::sized(body.len()));
+    let save = elapsed_ms(started);
+    let started = Instant::now();
+    let hold = settle_by_jobs(&mut long);
+    let settle = elapsed_ms(started);
+    let started = Instant::now();
+    long.remove_tree("long.md");
+    let delete = elapsed_ms(started);
+    let started = Instant::now();
+    let clear_hold = settle_by_jobs(&mut long);
+    println!(
+        "GROVE_BENCH one new note of 40,000 mixed links: save_ms={save:.2} settle_ms={settle:.1} longest_hold_ms={hold:.2}; deleted: delete_ms={delete:.3} clear_ms={:.2} longest_hold_ms={clear_hold:.3}",
+        elapsed_ms(started)
+    );
+
+    // Review 5: the same with more distinct queries (lines past the 10,000 targets add a missing
+    // note and a Markdown link to no file each), and a save adding a note between the publish's
+    // holds, so each hold has new key edits to check.
+    for lines in [10_000, 40_000] {
+        let mut long = Index::from_notes(&refs);
+        long.set_defer_links(true);
+        let body: String = (0..lines).map(|j| format!("[[t/{:05}]] [m](t/{:05}.md) [x](u/{j}.md) [[gone {j}]]\n", j % 10_000, (j * 7) % 10_000)).collect();
+        long.upsert_note(root, "long.md", &body, Stamp::sized(body.len()));
+        let mut added = 0;
+        let started = Instant::now();
+        let hold = settle_by_jobs_with(&mut long, &mut |idx| {
+            added += 1;
+            idx.upsert_note(root, &format!("w/{added}.md"), "new\n", Stamp::sized(4));
+        });
+        println!(
+            "GROVE_BENCH one new note of {} mixed links, a note added between holds: settle_ms={:.1} longest_hold_ms={hold:.2} ({added} notes added)",
+            lines * 4,
+            elapsed_ms(started)
+        );
+    }
+
+    // Review 8: a rescan's comparison with the live index. Before, the whole of it (and a copy
+    // of the link history) ran in the finish's write hold; now it runs in steps of 2,048 under
+    // the read lock, and the final hold compares only what changed meanwhile (here, nothing).
+    super::rescan::check_rescans(false);
+    // As in the app: the live index has a long link history, the scan's is new.
+    let mut fresh = Index::scan(root).expect("scan");
+    let live = &mut idx;
+    let started = Instant::now();
+    let whole = live.file_diff(&fresh);
+    let differing = live.links.differing(&fresh.links);
+    let whole_ms = elapsed_ms(started);
+    let started = Instant::now();
+    let mut diff = live.rescan_diff(&fresh);
+    let (mut steps, mut longest) = (0, 0.0f64);
+    loop {
+        let step = Instant::now();
+        let done = live.rescan_diff_step(&fresh, &mut diff, 2_048);
+        longest = longest.max(elapsed_ms(step));
+        steps += 1;
+        if done {
+            break;
+        }
+    }
+    let stepped_ms = elapsed_ms(started);
+    let started = Instant::now();
+    let found = live.finish_rescan_diff(&mut fresh, diff, &std::collections::BTreeSet::new());
+    let final_ms = elapsed_ms(started);
+    assert_eq!(found, whole);
+    println!(
+        "GROVE_BENCH rescan comparison, {} files: whole_ms={whole_ms:.1} ({} link entries differ); stepped total_ms={stepped_ms:.1} in {steps} steps, longest_step_ms={longest:.2}, final_hold_ms={final_ms:.3}",
+        fresh.files.len(),
+        differing.len()
+    );
+    super::rescan::check_rescans(true);
+}
+
+/// Settle as `link_reads::settle` does; the longest step that holds the lock (ms).
+fn settle_by_jobs(idx: &mut Index) -> f64 {
+    settle_by_jobs_with(idx, &mut |_| {})
+}
+
+/// `settle_by_jobs`, with `between` run (as a save would be) between a publish's holds.
+fn settle_by_jobs_with(idx: &mut Index, between: &mut dyn FnMut(&mut Index)) -> f64 {
+    use super::LinkSlice;
+    let mut hold = 0f64;
+    loop {
+        let started = Instant::now();
+        let job = idx.link_job();
+        hold = hold.max(elapsed_ms(started));
+        let Some(mut job) = job else {
+            return hold;
+        };
+        job.ask();
+        loop {
+            let started = Instant::now();
+            let got = idx.answer(&mut job);
+            hold = hold.max(elapsed_ms(started));
+            if got != LinkSlice::More {
+                break;
+            }
+        }
+        job.finish();
+        loop {
+            let started = Instant::now();
+            let got = idx.publish(&mut job);
+            hold = hold.max(elapsed_ms(started));
+            if got != LinkSlice::More {
+                break;
+            }
+            between(idx);
+        }
+    }
+}
+
+/// A whole `link_index` reply built as `link_reads` builds it: (total ms, longest step ms).
+fn reply_by_steps(idx: &Index) -> (f64, f64) {
+    use super::{LinkReply, ReplyStep};
+    let all = Instant::now();
+    let mut reply = LinkReply::new(None);
+    let mut hold = 0f64;
+    loop {
+        let started = Instant::now();
+        let step = reply.step(idx);
+        hold = hold.max(elapsed_ms(started));
+        reply.absorb();
+        if step == ReplyStep::Done {
+            break;
+        }
+    }
+    let index = reply.into_index();
+    assert!(!index.outgoing.is_empty());
+    (elapsed_ms(all), hold)
 }

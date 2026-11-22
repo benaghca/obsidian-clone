@@ -16,6 +16,7 @@ import { editorHost, type BaseEmbed, type EditorHost, type EmbedHost } from "./e
 import { baseEmbeds } from "./viewLoad";
 import { toggledTask } from "./editor/render";
 import { resolveLink } from "./links/internal";
+import { mapEntries } from "./links/linkDelta";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { createNote } from "./fileOps";
@@ -90,7 +91,8 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
     linkCandidates: () => {
       const candidates = new Map(ws.vault.files.filter(f => !f.is_dir && !ws.vault.isExcluded(f.path))
         .map(f => [f.path.toLowerCase(), { name: noteName(f.path), path: f.path }]));
-      for (const targets of Object.values(ws.vault.links.unresolved ?? {})) for (const target of targets) {
+      // Review 8: walked through any changes not folded in yet, without building the map.
+      for (const [, targets] of mapEntries(ws.vault.links, "unresolved")) for (const target of targets) {
         if (fileName(target).toLowerCase() === ".md") continue;
         const path = /\.md$/i.test(target) ? target : `${target}.md`;
         if (!ws.vault.isExcluded(path) && !ws.vault.linkExists(target, null) && !candidates.has(path.toLowerCase()))
