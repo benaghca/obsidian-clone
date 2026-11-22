@@ -206,6 +206,8 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       cancel = dragPointer(e, el, move => {
         let dx = (move.clientX - e.clientX) / scale, dy = (move.clientY - e.clientY) / scale;
         if (!suppress && Math.hypot(move.clientX - e.clientX, move.clientY - e.clientY) < 3) return;
+        // The moving cards are their own layers only while they move (canvas.css).
+        if (!suppress) world.classList.add("is-dragging-cards");
         suppress = true;
         if (!side && move.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }
         const step = move.altKey || !settings.get("canvas.json").snapToGrid ? 1 : 20;
@@ -252,7 +254,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
         // The selection is the same while it moves: only reposition its menu.
         paint(affected); menu.place();
       }, cancelled => {
-        show([]);
+        show([]); world.classList.remove("is-dragging-cards");
         if (!cancelled && !suppress && removeOnClick) { selected.delete(node.id); selection(); }
         finish(before, cancelled);
       }, false);

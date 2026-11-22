@@ -363,7 +363,8 @@ await withBrowser(async ({ send, run, click, double, point, press, check }) => {
   const editLink = await point('[data-node-id="text"].is-editing [data-href="PreviewTarget"]');
   const editScale = (await look()).scale;
   await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...editLink, deltaX: 0, deltaY: -300 * Math.log2(0.36 / editScale), modifiers: 2 });
-  await sleep(200);
+  // R2 CZ: the zoom glides for up to 200ms before it settles.
+  await sleep(400);
   const editingZoom = await run(() => {
     const world = document.querySelector('.canvas-world');
     const card = document.querySelector('[data-node-id="text"]');

@@ -28,10 +28,23 @@ await withBrowser(async ({ send, run, click, press, check }) => {
   const wheel = async (p, deltaY, ctrl) => {
     await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: p.x, y: p.y, deltaX: 0, deltaY, modifiers: ctrl ? 2 : 0 });
   };
-  const wheelTo = async (p, target) => {
-    const scale = (await look()).scale;
+  // `from` is the scale a glide still under way is headed for (R2 CZ: Ctrl+wheel glides).
+  const wheelTo = async (p, target, from) => {
+    const scale = from ?? (await look()).scale;
     await wheel(p, -300 * Math.log2(target / scale), true);
   };
+  // A wheel zoom glides for up to 200ms; wait until the world has stopped moving.
+  const landed = () => run(() => new Promise(resolve => {
+    let last = '', same = 0; const until = performance.now() + 3000;
+    const frame = () => { const t = document.querySelector('.canvas-world').style.transform; same = t === last ? same + 1 : 0; last = t; if (same >= 3 || performance.now() > until) resolve(); else requestAnimationFrame(frame); };
+    requestAnimationFrame(frame);
+  }));
+  // Mid-glide: wait until the painted scale is past `value`.
+  const paintedAbove = value => run(value => new Promise(resolve => {
+    const until = performance.now() + 1000;
+    const frame = () => { if (new DOMMatrix(document.querySelector('.canvas-world').style.transform).a > value || performance.now() > until) resolve(); else requestAnimationFrame(frame); };
+    frame();
+  }), value);
   const fastDouble = async (p) => {
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y });
     for (const clickCount of [1, 2]) {
@@ -99,56 +112,60 @@ await withBrowser(async ({ send, run, click, press, check }) => {
   // in-band end looks the same if the class were applied on that frame. The
   // out-and-back wheel below is what shows the settle wait.
   await wheelTo(at, 0.36);
-  await sleep(200);
+  await landed();
   check((await look()).out && (await look()).scale < 0.45, 'a wheel to 36% is title mode');
   const down = await burst([0.7, 0.32, 0.62, 0.5]);
   check(down.during.every(value => value === true), 'a one-frame burst does not flip title mode mid-turn');
   await sleep(40);
   const downFrame = await look();
   check(downFrame.out, 'title mode is still on one frame after the burst (' + downFrame.scale + ')');
-  await sleep(200);
+  await landed();
   const downSettled = await look();
   check(downSettled.out === titleMode(downSettled.scale, true) && downSettled.out && downSettled.scale > 0.45 && downSettled.scale <= 0.55,
     'ending a burst inside the band, having started on titles, keeps titles (' + JSON.stringify(downSettled) + ')');
 
   // The same shape from content ends just above 45% and keeps content.
   await wheelTo(at, 0.62);
-  await sleep(200);
+  await landed();
   check(!(await look()).out && (await look()).scale > 0.55, 'a wheel to 62% leaves title mode');
   const up = await burst([0.3, 0.8, 0.48]);
   check(up.during.every(value => value === false), 'a burst from content does not enter title mode mid-turn');
   await sleep(40);
   check(!(await look()).out, 'content is still showing one frame after that burst');
-  await sleep(200);
+  await landed();
   const upSettled = await look();
   check(upSettled.out === titleMode(upSettled.scale, false) && !upSettled.out && upSettled.scale >= 0.45,
     'ending a burst above 45%, having started on content, keeps content (' + JSON.stringify(upSettled) + ')');
 
   // Out and back across two frames, still inside the 120ms settle, cancels the pending change.
   await wheelTo(at, 0.36);
-  await sleep(200);
+  await landed();
   check((await look()).out, 'back in title mode before the two-frame return');
   await wheelTo(at, 0.72);
   await sleep(40);
   check((await look()).out, 'the outward wheel has not settled yet');
-  await wheelTo(at, 0.36);
+  await wheelTo(at, 0.36, 0.72);
   await sleep(40);
   check((await look()).out, 'the return wheel has not left title mode');
-  await sleep(220);
+  await landed();
   const returned = await look();
   check(returned.out && returned.scale < 0.45, 'returning within the settle never leaves title mode (' + JSON.stringify(returned) + ')');
 
   // A pan while a zoom-out of title mode is pending does not apply it early and does not cancel it.
   await wheelTo(at, 0.8);
-  await sleep(40);
+  await paintedAbove(0.55);
   const pending = await look();
   check(pending.out && pending.scale > 0.55, 'the zoom toward content is painted and title mode is still waiting (' + pending.scale + ')');
   await wheel(at, 160, false);
   await sleep(40);
   const panned = await look();
-  check(panned.out && Math.abs(panned.scale - pending.scale) < 1e-6 && (Math.abs(panned.x - pending.x) > 2 || Math.abs(panned.y - pending.y) > 2),
+  // The glide keeps the board point under the wheel fixed, so only the pan moves it.
+  const origin0 = await run(() => { const r = document.querySelector('.canvas-view').getBoundingClientRect(); return { left: r.left, top: r.top }; });
+  const under = v => [(at.x - origin0.left - v.x) / v.scale, (at.y - origin0.top - v.y) / v.scale];
+  const [px, py] = under(pending), [qx, qy] = under(panned);
+  check(panned.out && panned.scale > 0.55 && Math.hypot(qx - px, qy - py) > 2,
     'a pan during the settle moves the board and leaves title mode waiting (' + JSON.stringify({ pending, panned }) + ')');
-  await sleep(200);
+  await landed();
   const panSettled = await look();
   check(!panSettled.out && panSettled.scale > 0.55, 'title mode leaves after the zoom rests, pan included (' + JSON.stringify(panSettled) + ')');
 
@@ -158,22 +175,22 @@ await withBrowser(async ({ send, run, click, press, check }) => {
   // this case does not time that difference. The out-and-back wheel above is
   // what shows a later wheel replacing the pending one.
   await wheelTo(at, 0.34);
-  await sleep(200);
+  await landed();
   check((await look()).out, 'title mode is on before the zero-delta wheel');
   await wheelTo(at, 0.7);
   await sleep(40);
   check((await look()).out, 'title mode is waiting before the zero-delta wheel');
   await wheel(at, 0, true);
-  await sleep(40);
+  await paintedAbove(0.55);
   check((await look()).out && (await look()).scale > 0.55, 'a zero-delta wheel does not apply title mode early');
-  await sleep(200);
+  await landed(); await sleep(150);
   check(!(await look()).out, 'the pending leave still happens after the zero-delta wheel');
 
   // A zoom button flushes the scale it produced and the pending wheel must not undo that.
   await wheelTo(at, 0.36);
-  await sleep(200);
+  await landed();
   await wheelTo(at, 0.64);
-  await sleep(30);
+  await paintedAbove(0.55);
   check((await look()).out && (await look()).scale > 0.55, 'title mode is waiting on a wheel that would leave it');
   await click('[aria-label="Zoom out"]');
   await sleep(40);
@@ -186,23 +203,23 @@ await withBrowser(async ({ send, run, click, press, check }) => {
 
   // Bursts that end on the two edges. The float snap keeps 55% on titles and 45% on content.
   await wheelTo(at, 0.36);
-  await sleep(200);
+  await landed();
   await burst([0.3, 0.8, 0.55]);
-  await sleep(220);
+  await landed();
   const at55 = await look();
   check(at55.out && Math.abs(at55.scale - 0.55) < 1e-4, 'a burst ending at 55%, from titles, stays in title mode (' + at55.scale + ')');
   await wheelTo(at, 0.7);
-  await sleep(200);
+  await landed();
   check(!(await look()).out, 'content is showing before the 45% burst');
   await burst([0.3, 0.9, 0.45]);
-  await sleep(220);
+  await landed();
   const at45 = await look();
   check(!at45.out && Math.abs(at45.scale - 0.45) < 1e-4, 'a burst ending at 45%, from content, stays on content (' + at45.scale + ')');
 
   // Double-click while a zoom out of title mode has not settled: the class is still
   // title mode, so the click frames the card and the pending wheel does not pull it back.
   await wheelTo(at, 0.34);
-  await sleep(200);
+  await landed();
   const beforeJump = await cardPoint('t');
   const jumpScale = (await look()).scale;
   await wheel(beforeJump, -300 * Math.log2(0.85 / jumpScale), true);
@@ -223,7 +240,7 @@ await withBrowser(async ({ send, run, click, press, check }) => {
   await click('[aria-label="Reset zoom"]');
   await sleep(60);
   await wheelTo(await cardPoint('t'), 0.7);
-  await sleep(200);
+  await landed();
   check(!(await look()).out, 'content is showing before the zoom into title mode');
   const into = await cardPoint('t');
   const intoScale = (await look()).scale;
@@ -254,7 +271,7 @@ await withBrowser(async ({ send, run, click, press, check }) => {
 
   // Space is grab mode. A double-click must not frame or edit.
   await wheelTo(await cardPoint('t'), 0.34);
-  await sleep(200);
+  await landed();
   const grabAt = await cardPoint('t');
   const grabBefore = await look();
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
@@ -301,7 +318,7 @@ await withBrowser(async ({ send, run, click, press, check }) => {
   await sleep(40);
   check(await run(() => document.querySelector('.canvas-view').classList.contains('is-readonly')), 'the canvas is read-only');
   await wheelTo(await cardPoint('t'), 0.34);
-  await sleep(200);
+  await landed();
   await fastDouble(await cardPoint('t'));
   await sleep(80);
   const readFramed = await look();

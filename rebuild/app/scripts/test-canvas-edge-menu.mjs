@@ -290,7 +290,8 @@ await withBrowser(async ({ send, run, open, read, click, press, check }) => {
   });
   const wheelToCap = async (deltaY) => {
     await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...pivot, deltaX: 0, deltaY, modifiers: 2 });
-    await sleep(200);
+    // R2 CZ: the zoom glides for up to 200ms before it settles.
+    await sleep(400);
   };
 
   await wheelToCap(50000);

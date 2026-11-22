@@ -5,10 +5,11 @@ import type { CanvasNode } from "./model";
 import { glideCamera, type Camera } from "./present";
 import type { Tab } from "../tabs";
 import { canvasViewports } from "./viewports";
+import { clampZoom, glideAt, glideMs, retarget, zoomAround, type Glide } from "./zoomGlide";
 
 interface Bounds { left: number; top: number; right: number; bottom: number }
 export { canvasViewports };
-const clamp = (scale: number) => Math.max(1 / 16, Math.min(2, scale));
+const clamp = clampZoom;
 
 // One immutable band sheet. The view applies attributes to rings, titles and
 // handles in bounded slices, so settling never invalidates the world's subtree.
@@ -46,10 +47,17 @@ export interface CanvasViewport { x: number; y: number; width: number; height: n
 export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, path: string, history: (forward: boolean) => void, refresh: () => void, onPresent?: () => void) {
   let state = canvasViewports.get(tab);
   if (state?.path !== path) state = undefined;
-  let bounds: Bounds | null = null, width = 0, height = 0, frame = 0, drawn = "", settle = 0, gesture = false, flushBand = false;
+  let bounds: Bounds | null = null, width = 0, height = 0, frame = 0, drawn = "", settle = 0, gesture = false, flushBand = false, wheelPan = false;
   let rect: DOMRect | undefined, menu: HTMLElement | undefined, styled: HTMLElement | undefined;
   let space = false, dragging = false, suppressClick = false, titles = false;
   let held = false, gliding = false, glideGen = 0, glideResize = false;
+  // The wheel and pinch glide (zoomGlide.ts): its segment, the screen point it zooms
+  // around, and when the last zoom input arrived.
+  let zoomGlide: Glide | undefined, zoomFrame = 0, anchorX = 0, anchorY = 0, lastZoomInput = 0, pinching = false, pinchFrom = 1;
+  // While the board moves it is one composited layer, so a frame only changes its
+  // transform. At rest nothing on the board is a layer: an engine that rasters a layer
+  // once and scales the bitmap (WebKitGTK does) would otherwise blur text zoomed in.
+  let moving = false, rest = 0;
   let heldResize = () => {};
   let cancelDrag: (() => void) | undefined;
   const events = new AbortController();
@@ -58,9 +66,15 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   const snapshot = (): CanvasViewport | undefined => state && width && height ? { x: state.cx - width / state.scale / 2, y: state.cy - height / state.scale / 2, width: width / state.scale, height: height / state.scale, focusX: state.cx + (focusX - .5) * width / state.scale, focusY: state.cy + (focusY - .5) * height / state.scale, band: zoomBand(state.scale), titles, scale: state.scale } : undefined;
   const notifyLater = () => { clearTimeout(notify); notify = window.setTimeout(() => { notify = 0; if (!settle) changed(); }, SETTLE_MS); };
   installBands();
+  const still = () => { clearTimeout(rest); rest = 0; if (moving) { moving = false; world.classList.remove("is-moving"); } };
+  const move = () => {
+    if (!moving) { moving = true; world.classList.add("is-moving"); }
+    clearTimeout(rest); rest = window.setTimeout(still, SETTLE_MS);
+  };
   // Title mode changes with the band, at settle: one class on the world.
   const applyBand = (scale: number) => {
     clearTimeout(settle); settle = 0; clearTimeout(notify); notify = 0;
+    still();
     world.dataset.zoomBand = String(zoomBand(scale));
     titles = titleMode(scale, titles); world.classList.toggle("is-zoomed-out", titles);
     changed();
@@ -89,8 +103,8 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   function draw() {
     cancelAnimationFrame(frame);
     frame = 0;
-    const wheel = gesture, flush = flushBand;
-    gesture = false; flushBand = false;
+    const wheel = gesture, flush = flushBand, pan = wheelPan;
+    gesture = false; flushBand = false; wheelPan = false;
     if (!state || !width || !height) return;
     const { cx, cy, scale } = state;
     const x = width / 2 - cx * scale, y = height / 2 - cy * scale;
@@ -111,8 +125,8 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     styled = toolbar;
     if (key === drawn) return;
     drawn = key;
-    if (wheel || dragging) { pause(); notifyLater(); }
-    else if (!flush) notifyLater();
+    if (wheel || dragging) { pause(); notifyLater(); move(); }
+    else if (!flush) { notifyLater(); if (pan) move(); }
     placeTransform(cx, cy, scale);
     // Obsidian keeps dots legible when zoomed out, with a fixed .7px radius.
     let grid = 20 * scale;
@@ -123,6 +137,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   const schedule = () => { frame ||= requestAnimationFrame(draw); };
   function fit(next = bounds, max = 1) {
     if (held || !next || !width || !height) return;
+    stopGlide();
     gesture = false; flushBand = true;
     state = { path, cx: (next.left + next.right) / 2, cy: (next.top + next.bottom) / 2,
       scale: clamp(Math.min(max, width / (Math.max(1, next.right - next.left) * 1.1), height / (Math.max(1, next.bottom - next.top) * 1.1))) };
@@ -130,23 +145,68 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   }
   function zoom(scale: number, x = width / 2, y = height / 2) {
     if (!state || held) return;
-    scale = clamp(scale);
-    state.cx += (x - width / 2) * (1 / state.scale - 1 / scale);
-    state.cy += (y - height / 2) * (1 / state.scale - 1 / scale);
-    state.scale = scale;
+    Object.assign(state, zoomAround(state, clamp(scale), x, y, width, height));
     schedule();
   }
-  const zoomNow = (scale: number) => { if (held || !state) return; gesture = false; flushBand = true; zoom(scale); };
+  // Where the board is headed: a button press or a tick builds on the glide's target.
+  const aim = () => zoomGlide?.target ?? state?.scale ?? 1;
+  const stopGlide = () => { cancelAnimationFrame(zoomFrame); zoomFrame = 0; zoomGlide = undefined; };
+  // Land a running glide where it was headed (a resize keeps the zoom that was asked for).
+  const finishGlide = () => {
+    const target = zoomGlide?.target; stopGlide();
+    if (state && target !== undefined) Object.assign(state, zoomAround(state, target, anchorX, anchorY, width, height));
+  };
+  // A wheel tick or pinch step of `step` octaves around (x, y): move the target and glide.
+  function zoomBy(step: number, x: number, y: number) {
+    if (!state || held) return;
+    gesture = true; flushBand = false;
+    const now = performance.now();
+    lastZoomInput = now;
+    // A zero step (Ctrl with a sideways scroll, or a redraw after the viewport was set) only redraws.
+    if (step === 0) { schedule(); return; }
+    anchorX = x; anchorY = y;
+    zoomGlide = retarget(zoomGlide, state.scale, clamp(aim() * 2 ** step), now, glideMs(step));
+    // At the zoom limit: the same viewport is redrawn, which still postpones settle.
+    if (!zoomGlide) { schedule(); return; }
+    zoomFrame ||= requestAnimationFrame(glideFrame);
+  }
+  function glideFrame() {
+    zoomFrame = 0;
+    if (!zoomGlide || !state || held) { zoomGlide = undefined; return; }
+    const now = performance.now(), at = glideAt(zoomGlide, now), target = zoomGlide.target;
+    if (at.done) zoomGlide = undefined; else zoomFrame = requestAnimationFrame(glideFrame);
+    Object.assign(state, zoomAround(state, at.done ? target : 2 ** at.log, anchorX, anchorY, width, height));
+    gesture = true; flushBand = false;
+    draw();
+    if (at.done) settleAfter(now);
+  }
+  // A glide has landed. Settle now if the input has rested for the settle time, else when it has.
+  function settleAfter(now: number) {
+    if (!state) return;
+    const wait = lastZoomInput + SETTLE_MS - now;
+    if (wait <= 0) applyBand(state.scale);
+    else { clearTimeout(settle); settle = window.setTimeout(() => { settle = 0; if (state) applyBand(state.scale); }, wait); }
+  }
+  // Pressing on the board lands a running glide on its target at once, so a pan,
+  // card drag or double-click works from the zoom that was asked for.
+  function landGlide() {
+    if (!zoomGlide || !state) return;
+    finishGlide();
+    gesture = true; flushBand = false;
+    draw();
+    settleAfter(performance.now());
+  }
+  const zoomNow = (scale: number) => { if (held || !state) return; stopGlide(); gesture = false; flushBand = true; zoom(scale); };
   const controls = h("div", { class: "canvas-controls" });
   const settingsButton = keyButton(icon("settings"), "Canvas settings", () => canvasSettings(el, settingsButton, refresh));
   const undo = keyButton(icon("undo-2"), "Undo", () => history(false));
   const redo = keyButton(icon("redo-2"), "Redo", () => history(true));
   const zoomControls = h("div", { class: "canvas-control-group" });
   for (const [label, glyph, action] of [
-    ["Zoom in", "plus", () => zoomNow((state?.scale ?? 1) * Math.SQRT2)],
+    ["Zoom in", "plus", () => zoomNow(aim() * Math.SQRT2)],
     ["Reset zoom", "rotate-cw", () => zoomNow(1)],
     ["Zoom to fit\n(Shift + 1)", "maximize", () => fit()],
-    ["Zoom out", "minus", () => zoomNow((state?.scale ?? 1) / Math.SQRT2)],
+    ["Zoom out", "minus", () => zoomNow(aim() / Math.SQRT2)],
   ] as const) zoomControls.append(keyButton(icon(glyph), label, e => {
     if (e.type === "keydown") { e.stopPropagation(); action(); }
     else { action(); el.focus({ preventScroll: true }); }
@@ -180,14 +240,31 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     rect ??= el.getBoundingClientRect();
     focusX = (e.clientX - rect.left) / width; focusY = (e.clientY - rect.top) / height;
     if (e.ctrlKey || space) {
-      gesture = true; flushBand = false;
-      zoom(state.scale * 2 ** (-e.deltaY * unit / 300), e.clientX - rect.left, e.clientY - rect.top);
+      // WebKit on macOS reports a pinch as gesture events too; those drive it then.
+      if (!pinching) zoomBy(-e.deltaY * unit / 300, e.clientX - rect.left, e.clientY - rect.top);
     } else {
       state.cx += (e.deltaX + (e.shiftKey ? e.deltaY : 0)) * unit * .93 / state.scale;
       if (!e.shiftKey) state.cy += e.deltaY * unit * .93 / state.scale;
+      wheelPan = true;
       schedule();
     }
   }, { passive: false });
+  // Safari-style gesture events carry the pinch's scale since it began.
+  type Pinch = Event & { scale: number; clientX: number; clientY: number };
+  el.addEventListener("gesturestart", e => {
+    if (!state || held) return;
+    e.preventDefault(); pinching = true; pinchFrom = aim();
+  });
+  el.addEventListener("gesturechange", e => {
+    const pinch = e as Pinch;
+    if (!pinching || !state || held || !(pinch.scale > 0)) return;
+    e.preventDefault();
+    rect ??= el.getBoundingClientRect();
+    const x = Number.isFinite(pinch.clientX) ? pinch.clientX - rect.left : width / 2, y = Number.isFinite(pinch.clientY) ? pinch.clientY - rect.top : height / 2;
+    const step = Math.log2(clamp(pinchFrom * pinch.scale) / aim());
+    if (step) zoomBy(step, x, y);
+  });
+  el.addEventListener("gestureend", e => { if (pinching) { e.preventDefault(); pinching = false; } });
   el.addEventListener("keydown", e => {
     if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only], .cm-editor, .canvas-node.is-base .bases-view, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
     if (held) return;
@@ -206,6 +283,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     // starts below, including on a link, so a held Space click does not follow it.
     if (!target.closest(".cm-editor, [contenteditable], input, textarea, button, a")) el.focus({ preventScroll: true });
     if (held) return;
+    landGlide();
     if (!state || (e.button !== 1 && !(e.button === 0 && space))) return;
     e.preventDefault(); e.stopPropagation();
     cancelDrag?.();
@@ -227,6 +305,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     width = entry.contentRect.width; height = entry.contentRect.height; rect = undefined;
     if (gliding) { glideResize = true; return; }
     if (held) { heldResize(); return; }
+    finishGlide();
     gesture = false; flushBand = true;
     if (!state) fit(); else draw();
   });
@@ -247,6 +326,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     camera() { return state && width && height ? { cx: state.cx, cy: state.cy, scale: state.scale, width, height } : undefined; },
     reflow() { width = el.clientWidth; height = el.clientHeight; rect = undefined; },
     jump(next: Camera) {
+      stopGlide();
       glideGen++; gliding = false; glideResize = false; cancelAnimationFrame(frame); frame = 0;
       state = { path, cx: next.cx, cy: next.cy, scale: next.scale };
       canvasViewports.set(tab, state);
@@ -256,6 +336,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
       draw();
     },
     glide(next: Camera, ms: number) {
+      stopGlide();
       const gen = ++glideGen;
       gliding = true;
       glideResize = false;
@@ -272,7 +353,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
           const p = Math.min(1, (now - t0) / Math.max(1, ms));
           const cam = glideCamera(from, next, p);
           state = { path, ...cam };
-          placeTransform(cam.cx, cam.cy, cam.scale);
+          placeTransform(cam.cx, cam.cy, cam.scale); move();
           canvasViewports.set(tab, state);
           if (p < 1) requestAnimationFrame(step);
           else {
@@ -288,8 +369,8 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
       });
     },
     cancelGlide() { glideGen++; gliding = false; glideResize = false; },
-    hold(next: boolean) { held = next; if (next) releaseSpace(); },
+    hold(next: boolean) { held = next; if (next) { releaseSpace(); stopGlide(); pinching = false; } },
     onHeldResize(fn: () => void) { heldResize = fn; },
-    dispose() { glideGen++; gliding = false; glideResize = false; cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); clearTimeout(notify); size.disconnect(); events.abort(); },
+    dispose() { glideGen++; gliding = false; glideResize = false; stopGlide(); cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); clearTimeout(notify); clearTimeout(rest); size.disconnect(); events.abort(); },
   };
 }
