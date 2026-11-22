@@ -122,7 +122,7 @@ pub(crate) fn flush_changes(
             return Vec::new();
         };
         if !events.iter().any(|event| event.need_rescan()) {
-            let raw = coalesce(&vault.root, events, |path| vault.is_own_write(path));
+            let raw = coalesce_in(&vault.root, events, |path| vault.index.is_dir(path), |path| vault.is_own_write(path));
             let changes = vault.normalize(raw);
             vault.apply(&changes);
             return changes;
@@ -154,6 +154,16 @@ struct RenamePart {
 pub fn coalesce(
     root: &Path,
     events: &[Event],
+    suppress: impl FnMut(&str) -> bool,
+) -> Vec<VaultChanged> {
+    coalesce_in(root, events, |_| false, suppress)
+}
+
+/// [`coalesce`] with `was_dir`: whether the pre-batch index has the path as a directory.
+pub fn coalesce_in(
+    root: &Path,
+    events: &[Event],
+    was_dir: impl Fn(&str) -> bool,
     mut suppress: impl FnMut(&str) -> bool,
 ) -> Vec<VaultChanged> {
     let mut creates = BTreeSet::new();
@@ -225,13 +235,15 @@ pub fn coalesce(
         modifies.remove(path);
     }
     // A file removed and created again is one modify (an atomic save). A directory
-    // that left and came back is a replacement: a child can keep its size and
-    // mtime, so the event has to stay a remove and a create.
+    // that left or came back is a replacement: a child can keep its size and
+    // mtime, or be gone, so the event has to stay a remove and a create. Either
+    // side counts: the index had a directory there, or the disk has one now.
     let overlap: Vec<String> = creates.intersection(&removes).cloned().collect();
     for path in overlap {
         creates.remove(&path);
         removes.remove(&path);
-        let directory = std::fs::symlink_metadata(root.join(&path)).is_ok_and(|meta| meta.is_dir());
+        let directory = was_dir(&path)
+            || std::fs::symlink_metadata(root.join(&path)).is_ok_and(|meta| meta.is_dir());
         if directory {
             removes.insert(path.clone());
             creates.insert(path);
@@ -582,6 +594,68 @@ mod tests {
         );
         assert_eq!(coalesce(&dir.path, &[child], |_| false), one(ChangeKind::Modify, &["Dir/clip.mp3"]));
         let _ = fs::remove_dir_all(&parked);
+    }
+
+    /// A create-only event for a folder the index already has rebuilds that
+    /// subtree from disk: a child the replacement lacks leaves the index, and a
+    /// child it keeps gets its new stamp.
+    #[test]
+    fn create_of_an_indexed_folder_rebuilds_its_subtree() {
+        let dir = tmp_dir("dir-create-replace");
+        let folder = dir.path.join("Dir");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("clip.mp3"), b"OLD").unwrap();
+        fs::write(folder.join("gone.mp3"), b"GONE").unwrap();
+        let mut vault = crate::vault::Vault::open(dir.path.clone()).unwrap();
+        assert!(vault.index.contains("Dir/gone.mp3"));
+        assert_eq!(vault.index.stamp("Dir/clip.mp3").unwrap().size, 3);
+
+        let parked = dir.path.with_extension("out");
+        let _ = fs::remove_dir_all(&parked);
+        fs::rename(&folder, &parked).unwrap();
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("clip.mp3"), b"NEW-LONGER").unwrap();
+
+        let changes = vault.normalize(one(ChangeKind::Create, &["Dir"]));
+        assert_eq!(changes, one(ChangeKind::Create, &["Dir"]));
+        vault.apply(&changes);
+        assert!(vault.index.is_dir("Dir"));
+        assert!(!vault.index.contains("Dir/gone.mp3"));
+        assert_eq!(vault.index.stamp("Dir/clip.mp3").unwrap().size, 10);
+        let _ = fs::remove_dir_all(&parked);
+    }
+
+    /// A folder replaced by a file of the same name in one batch. The disk now
+    /// has a file, but the index had a folder, so the pair stays a remove and a
+    /// create and the old children leave the index.
+    #[test]
+    fn folder_replaced_by_a_file_stays_structural() {
+        let dir = tmp_dir("dir-to-file");
+        let folder = dir.path.join("Dir");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("clip.mp3"), b"OLD").unwrap();
+        let mut vault = crate::vault::Vault::open(dir.path.clone()).unwrap();
+        assert!(vault.index.contains("Dir/clip.mp3"));
+
+        fs::remove_dir_all(&folder).unwrap();
+        fs::write(&folder, b"now a file").unwrap();
+        let events = [
+            kind(EventKind::Remove(RemoveKind::Folder), vec![folder.clone()]),
+            kind(EventKind::Create(CreateKind::File), vec![folder.clone()]),
+        ];
+        let raw = coalesce_in(&dir.path, &events, |path| vault.index.is_dir(path), |_| false);
+        let changes = vault.normalize(raw);
+        assert_eq!(
+            changes,
+            vec![
+                VaultChanged { kind: ChangeKind::Remove, paths: vec!["Dir".into()] },
+                VaultChanged { kind: ChangeKind::Create, paths: vec!["Dir".into()] },
+            ]
+        );
+        vault.apply(&changes);
+        assert!(vault.index.contains("Dir"));
+        assert!(!vault.index.is_dir("Dir"));
+        assert!(!vault.index.contains("Dir/clip.mp3"));
     }
 
     #[test]

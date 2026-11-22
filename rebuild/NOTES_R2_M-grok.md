@@ -100,3 +100,13 @@ Codex review 9 (PASS-WITH-FIXES) on `833345f`. Two fixes. Rendering and playback
 `cargo test --offline` in `rebuild/app/src-tauri`: `grove_lib` 209 passed, 0 failed, 5 ignored. The binary and doc-tests ran 0 tests. Exit 0. `ValueWalk`, `len`, and `values` in `file_map.rs` are still unused. That warning was already there.
 
 `heavy npm test` reached Vitest: 113 files, 1711 tests passed, including the new discarded-read case. Feel reported the known graph gap (p95 33.4 ms, max 33.5 ms, 58 of 186 frames). The chain then stopped in `test-canvas-edge-controls.mjs` on the line-direction menu at 133.3 ms against two frames. That script passed on its own at 16.8 ms. Continuing from `test-r26-bugs.mjs` passed through `test-lazy-views.mjs`. `posttest` stopped in `test-bases-embed.mjs` on the cold open at 115.4 ms against 100 ms. That script passed on its own at 28.5 ms. The rest of `posttest`, from `test-bases-search.mjs` through `test-bases-edge.mjs`, passed. Both misses are frame and open-time budgets. Screenshot trees under `rebuild/round23-shots` through `rebuild/round33-shots` were restored and are not in the commit. Nothing was pushed.
+
+## Review round 10
+
+Codex review 10 (FAIL) on `cac603a`. Two P2 fixes, nothing else. No new crates or packages.
+
+**A create at an indexed folder rebuilds that subtree.** `Vault::apply` drops the indexed subtree of a create-only folder event before it reloads the folder from disk. A child the replacement lacks leaves the file tree and embed resolution. A child it keeps gets its new stamp. The folder's stored ids are reset. Test: `watch::tests::create_of_an_indexed_folder_rebuilds_its_subtree`.
+
+**A folder replaced by a file stays structural.** The watcher (`coalesce_in`) checks the pre-batch index as well as the disk before it merges a remove and a create of one path. If either side is a directory, the pair stays a remove and a create, so the file list refreshes and an open descendant reloads. Tests: `watch::tests::folder_replaced_by_a_file_stays_structural` (event shape and index through `Vault::apply`) and the Vitest case "reloads an open recording when a file replaces its folder".
+
+All runs went through `heavy`. `cargo test --lib watch::` passed 23 of 23 and `cargo test --lib vault::` passed 46 of 46. `npx vitest run src/mediaWatch.test.ts` passed 14 of 14. The full suites were not run.

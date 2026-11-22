@@ -361,6 +361,18 @@ it("reloads a watched file once when a folder rename drops it from the list", as
   expect(hits).toBe(1);
 });
 
+it("reloads an open recording when a file replaces its folder", async () => {
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 1, 4)];
+  const { host } = await openHost();
+  let hits = 0;
+  host.embeds.watch("Dir/clip.mp3", () => { hits += 1; });
+  files = [file("Dir", 11, 10)];
+  emit({ kind: "remove", paths: ["Dir"] });
+  emit({ kind: "create", paths: ["Dir"] });
+  await settle();
+  expect(hits).toBe(1);
+});
+
 it("stops scanning a media path when its last watcher unsubscribes", async () => {
   files = [file("clip.mp3", 1, 4), file("keep.mp3", 1, 4)];
   const { vault, host } = await openHost();

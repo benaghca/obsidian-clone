@@ -572,6 +572,15 @@ impl Vault {
                 next_id += 1;
             }
         }
+        // A create at a folder the index already has is a replacement. Its subtree
+        // is rebuilt from disk, so children the new folder lacks leave and the
+        // ones it keeps get their new stamps.
+        let replaced_dirs: Vec<&String> = changes
+            .iter()
+            .filter(|change| change.kind == ChangeKind::Create)
+            .flat_map(|change| &change.paths)
+            .filter(|path| self.index.is_dir(path))
+            .collect();
         {
             let root = &self.root;
             let mut batch = self.index.map_batch();
@@ -590,6 +599,9 @@ impl Vault {
                     }
                     ChangeKind::Create | ChangeKind::Modify => {
                         for path in &change.paths {
+                            if change.kind == ChangeKind::Create && replaced_dirs.contains(&path) {
+                                batch.remove_tree(path);
+                            }
                             batch.refresh_path(root, path);
                         }
                     }
@@ -597,6 +609,10 @@ impl Vault {
             }
         }
         self.track_ids(changes);
+        for path in &replaced_dirs {
+            self.forget_id_tree(path);
+            self.remember_id(path);
+        }
         self.track_own(changes, at.clone(), &stayed);
         // The batch above relocates every rename, including an echo of a move
         // the app already applied. Put a source that is still on disk back.
