@@ -27,6 +27,7 @@ import { linkEntryOf } from "../links/linkDelta";
 import { mapping, readYaml, type Yaml } from "./yaml";
 import { createGroupedView, runSliced, type Entry } from "./groups";
 import { searchWork, rowText } from "./search";
+import { entryText, exportCsv, tableOf, type ShownTable } from "./results";
 import { settings } from "../settings/store";
 
 /** How long a burst of typing waits before the open base rebuilds. Matches the note save delay. */
@@ -326,7 +327,15 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   let source = "", reload = true, gone = false, running = false, dirty = false, timer = 0, frame = 0, start = -1;
   const cards = () => model?.type === "cards", kanban = () => model?.type === "kanban", isList = () => model?.type === "list";
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
-  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => (layout().rows() ?? drawn).map(entry => model!.columns.map(key => entry.context.get(key))), next => { query = next; void refilter(); }, key => inferred.get(noteKey(key)) ?? "text", { groups: () => layout().groups(), hiddenRows: () => layout().hiddenRows() });
+  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, shownTable, next => { query = next; void refilter(); }, key => inferred.get(noteKey(key)) ?? "text", { groups: () => layout().groups(), hiddenRows: () => layout().hiddenRows() }, () => void exportView());
+  /** The rows shown (after the limit, the Search box and hidden groups), in their order, as their cells read, under the shown columns' display names. */
+  function shownTable(): ShownTable {
+    if (!model) return { headers: [], rows: [] };
+    return tableOf(model.columns, model.label, layout().rows() ?? drawn, (key, entry) => entryText(key, entry, index.host.typeOf(noteKey(key)), type));
+  }
+  /** Export as CSV: the Results menu, the tab's More options and "Bases: Export as CSV" all come here. */
+  const exportView = () => model ? exportCsv(ws, { source: o.watch ?? hostPath(), view: model.name, table: shownTable() }) : Promise.resolve(null);
+  Object.assign(el, { exportCsv: exportView });
   /** Draw the toolbar's buttons, once: moving them would blur the Search box. */
   const drawToolbar = () => { const items = menus.toolbar(); if (items.some((item, i) => toolbar.children[i] !== item)) toolbar.replaceChildren(...items); };
   let automatic: number[] = [];

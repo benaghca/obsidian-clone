@@ -9,7 +9,7 @@ import type { Property } from "../editor/frontmatter";
 import { isFormulaError, type Value } from "./expression";
 import { groupRows } from "./groups";
 import { baseModel, baseNoteFiles, type Row } from "./model";
-import { tableCsv } from "./results";
+import { shownText, tableCsv } from "./results";
 import { rowText, searchWork } from "./search";
 import { summarize, summaryValue } from "./summaries";
 
@@ -211,21 +211,22 @@ views:
   const selected = model.select(rows);
   expect(selected.map(r => r.row.file.path)).toEqual(["Alpha.md", "Quote.md", "Zero.md"]);
   const visible = (query: string) => runSync(searchWork(selected, query, e => rowText(e.context, model.columns)));
-  const csv = (entries: readonly typeof selected[number][]) => tableCsv(model.columns.map(model.label), entries.map(e => model.columns.map(k => e.context.get(k))));
+  const shown = (e: typeof selected[number], k: string) => { const p = e.row.props.find(p => p.key === k), v = e.context.get(k); return shownText(k, v, p, p?.type ?? (typeof v === "number" ? "number" : "text")); };
+  const csv = (entries: readonly typeof selected[number][]) => tableCsv({ headers: model.columns.map(model.label), rows: entries.map(e => model.columns.map(k => shown(e, k))) });
   const sum = (entries: readonly typeof selected[number][], key: string) => summaryValue(summarize(entries, groupRows(entries, null), model.summaryPlan).all, key);
   const all = visible("");
   expect(sum(all, "points")).toBe(5);
   expect(isFormulaError(sum(all, "formula.boom"))).toBe(true);
-  expect(csv(all)).toBe('file name,State,points,label,Boom\nAlpha,open,1,plain,1\nQuote,open,4,"he said ""hi"",\r\nthen 🎉",0.25\nZero,open,0,zero,#ERROR: Division by zero');
+  expect(csv(all)).toBe('file name,State,points,label,Boom\r\nAlpha,open,1,plain,1\r\nQuote,open,4,"he said ""hi"",\r\nthen 🎉",0.25\r\nZero,open,0,zero,#ERROR: Division by zero\r\n');
   const plain = visible("plain");
   expect(plain.map(r => r.row.file.path)).toEqual(["Alpha.md"]);
   expect(sum(plain, "points")).toBe(1);
   expect(sum(plain, "formula.boom")).toBe(1);
-  expect(csv(plain)).toBe("file name,State,points,label,Boom\nAlpha,open,1,plain,1");
+  expect(csv(plain)).toBe("file name,State,points,label,Boom\r\nAlpha,open,1,plain,1\r\n");
   expect(csv(plain)).not.toContain("secret");
   expect(csv(plain)).not.toContain("Beta");
   const quoted = visible("🎉");
-  expect(csv(quoted)).toBe('file name,State,points,label,Boom\nQuote,open,4,"he said ""hi"",\r\nthen 🎉",0.25');
+  expect(csv(quoted)).toBe('file name,State,points,label,Boom\r\nQuote,open,4,"he said ""hi"",\r\nthen 🎉",0.25\r\n');
   // The display name lives on this base's model. The property value and another base stay as they were.
   expect(model.label("status")).toBe("State");
   expect(model.label("formula.boom")).toBe("Boom");

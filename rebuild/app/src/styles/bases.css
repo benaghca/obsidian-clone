@@ -186,3 +186,9 @@
 .bases-group-add-row { display: flex; align-items: center; gap: 6px; padding: 0 4px; color: var(--text-muted); --icon-size: 14px; }
 .bases-group-add { flex: 1; min-width: 0; height: 26px; padding: 0 6px; border: 0; border-radius: 4px; background: var(--background-modifier-form-field); box-shadow: var(--input-shadow); color: var(--text-normal); font: inherit; outline: none; }
 .bases-group-filter { margin: 0; }
+/* Export as CSV: the save dialog's path field (shell/confirm.ts modal). */
+.bases-export { display: flex; flex-direction: column; gap: 8px; }
+.bases-export-label { display: flex; flex-direction: column; gap: 4px; color: var(--text-muted); }
+.bases-export-label > .setting-input { width: 100%; box-sizing: border-box; padding: 4px 8px; color: var(--text-normal); }
+.bases-export-note { color: var(--text-muted); }
+.bases-export-error { color: var(--text-error); }

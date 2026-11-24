@@ -93,6 +93,10 @@ export function registerAppCommands(parts: AppParts) {
   const hasNote = () => !!ws.active.path;
   const file = () => ws.active.path ?? (ws.active.type === "canvas" || ws.active.type === "drawing" ? ws.active.viewFile : null);
   const drawing = () => (ws.active.type === "drawing" ? ws.active.viewFile ?? null : null);
+  /** The active .base tab's view, which exports what it shows (bases/view.ts). */
+  const baseView = () => ws.active.type === "base"
+    ? parts.panes.el.querySelector<HTMLElement & { exportCsv?: () => Promise<unknown> }>(".workspace-tabs.mod-active .bases-view") ?? null
+    : null;
   const hasFile = () => !!file();
   const note = () => ws.active.path!;
 
@@ -355,6 +359,7 @@ export function registerAppCommands(parts: AppParts) {
     }, () => ws.active.type === "canvas", [{ key: "f5" }]),
     action("drawing:new-file", "Create new drawing", "pencil", () => newDrawing(ws)),
     conditionalAction("drawing:new-file-embed", "Create new drawing and embed it here", "pencil", () => newDrawingHere(), (focus) => canEdit(focus)),
+    conditionalAction("bases:export-csv", "Bases: Export as CSV", "file-down", () => void baseView()?.exportCsv?.(), () => !!baseView()?.exportCsv),
     conditionalAction("drawing:export-svg", "Drawing: Export as SVG", "image-down", () => exportDrawing(ws, drawing()!, "svg"), () => !!drawing()),
     conditionalAction("drawing:export-png", "Drawing: Export as PNG", "image-down", () => exportDrawing(ws, drawing()!, "png"), () => !!drawing()),
     conditionalAction("drawing:copy-png", "Drawing: Copy as PNG", "clipboard-copy", () => copyDrawingPng(drawing()!), () => !!drawing()),

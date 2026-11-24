@@ -20,7 +20,7 @@ await withBrowser(async ({ run, click, point, move, send, press, fill, check }) 
   assert.equal(await run(() => document.querySelector('tfoot [data-property="done"]').dataset.value), '2');
   assert.equal(await run(() => document.querySelector('tfoot [data-property="due"]').dataset.value), '2024-01-01');
   assert.equal(await run(() => document.querySelector('tfoot [data-property="tags"]').dataset.value), '2');
-  // Copy (and Export CSV, from the same rows) lists rows in the order the groups draw them.
+  // Copy (and Export as CSV, from the same rows) lists rows in the order the groups draw them.
   await send('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   await click('.bases-count'); await menu('Copy to clipboard');
   assert.deepEqual(await run(async () => (await navigator.clipboard.readText()).split('\n').slice(1).map(line => line.split('\t')[0])), ['C', 'A', 'B', 'D'], 'copied rows follow the groups');
