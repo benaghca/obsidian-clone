@@ -571,6 +571,7 @@ export function createMenus(host: MenuHost) {
   function moreOptions(): MenuItems {
     const t = ws.active;
     if (t.type === "drawing" && t.viewFile) return drawingViewItems(t, t.viewFile);
+    if (t.type === "base") return [...graphViewItems(t), SEPARATOR, commands.menuItem("bases:export-csv", { title: "Export as CSV..." })];
     if (t.type) return graphViewItems(t);
     return t.path ? viewItems(t, t.path) : [];
   }

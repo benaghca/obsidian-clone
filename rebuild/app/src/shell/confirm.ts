@@ -16,6 +16,10 @@ interface ConfirmOptions {
   warning?: boolean;
   /** Show a "Don't ask again" checkbox. */
   dontAskAgain?: boolean;
+  /** A field in `message` that has focus first and joins the Tab cycle (a save dialog's path). */
+  field?: HTMLElement;
+  /** Checked before confirming. False keeps the dialog open (the field said what is wrong). */
+  accept?: () => boolean | Promise<boolean>;
 }
 
 let openCount = 0;
@@ -44,7 +48,17 @@ export function confirmDialog(o: ConfirmOptions): Promise<{ ok: boolean; dontAsk
       ),
     );
     const overlay = h("div", { class: "modal-container mod-dim mod-settings-container" }, h("div", { class: "modal-bg", onclick: () => done(false) }), modal);
-    let finished = false;
+    let finished = false, checking = false;
+    async function confirm() {
+      if (finished || checking) return;
+      if (o.accept) {
+        checking = true;
+        let ok = false;
+        try { ok = await o.accept(); } catch { ok = false; } finally { checking = false; }
+        if (!ok) { o.field?.focus(); return; }
+      }
+      done(true);
+    }
     function done(ok: boolean) {
       if (finished) return;
       finished = true;
@@ -53,15 +67,15 @@ export function confirmDialog(o: ConfirmOptions): Promise<{ ok: boolean; dontAsk
       restoreFocus?.focus({ preventScroll: true });
       resolve({ ok, dontAskAgain: ok && box.checked });
     }
-    yes.addEventListener("click", () => done(true));
+    yes.addEventListener("click", () => void confirm());
     no.addEventListener("click", () => done(false));
     overlay.addEventListener("keydown", (e) => {
       if (e.key === "Escape") done(false);
-      else if (e.key === "Enter" && e.target !== no && e.target !== box) done(true);
+      else if (e.key === "Enter" && e.target !== no && e.target !== box) void confirm();
       else if (e.key === "Tab") {
         // Keep focus in the dialog.
-        const stops = [box, yes, no].filter((el) => el.isConnected);
-        const i = stops.indexOf(document.activeElement as HTMLInputElement);
+        const stops = [o.field, box, yes, no].filter((el): el is HTMLElement => !!el?.isConnected);
+        const i = stops.indexOf(document.activeElement as HTMLElement);
         e.preventDefault();
         stops[(i + (e.shiftKey ? -1 : 1) + stops.length) % stops.length].focus();
       } else return;
@@ -70,6 +84,6 @@ export function confirmDialog(o: ConfirmOptions): Promise<{ ok: boolean; dontAsk
     });
     openCount++;
     document.body.append(overlay);
-    yes.focus();
+    (o.field ?? yes).focus();
   });
 }

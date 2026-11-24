@@ -107,31 +107,42 @@ await withBrowser(async ({ run, send, click, press, fill, check }) => {
   await wait(async () => await count() === '4 results', 'filtered to status open');
   assert.equal(await run(() => document.querySelector('tfoot [data-property="points"]')?.dataset.value), '8');
   assert.equal(await run(() => document.querySelector('tfoot [data-property="formula.boom"]')?.dataset.value), '#ERROR!');
-  await run(() => {
-    const orig = URL.createObjectURL.bind(URL);
-    URL.createObjectURL = blob => { if (String(blob.type).startsWith('text/csv')) window.__csvBlob = blob; return orig(blob); };
-    document.addEventListener('click', e => {
-      const a = e.target instanceof Element && e.target.closest('a[download]');
-      if (!a) return;
-      e.preventDefault();
-      window.__csvName = a.download;
-    }, true);
+  // Export as CSV writes through the save dialog to a vault file; capture the bytes it writes.
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    const orig = api.replaceFileBytes;
+    window.__csvWrites = [];
+    api.replaceFileBytes = async (path, bytes) => { window.__csvWrites.push({ path, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) }); return orig(path, bytes); };
   });
+  const exportCsv = async () => {
+    const before = await run(() => window.__csvWrites.length);
+    await click('.bases-count');
+    await click(await menuItem('Export as CSV...'));
+    await wait(() => run(() => !!document.querySelector('.bases-export input')), 'save dialog');
+    const name = await run(() => document.querySelector('.bases-export input').value);
+    await press('Enter');
+    // Saving the same view again asks before replacing; Enter says Replace.
+    await wait(async () => {
+      if (await run(() => document.querySelector('.modal-container:last-child .modal-title')?.textContent.startsWith('Replace'))) await press('Enter');
+      return run(n => window.__csvWrites.length > n, before);
+    }, 'csv written');
+    const written = await run(() => window.__csvWrites.at(-1));
+    // The "Saved" notice sits over the toolbar's right end; the next steps click there.
+    await run(() => document.querySelector('.notice-container')?.remove());
+    assert.equal(written.path, name);
+    return { name, text: written.text };
+  };
   await search('plain');
   await wait(async () => await ready() && await count() === '1 results' && await run(() => document.querySelector('tfoot [data-property="points"]')?.dataset.value) === '1', 'search plain');
   assert.equal(await run(() => document.querySelector('tfoot [data-property="formula.boom"]')?.dataset.value), '1', 'the formula sum drops the divide-by-zero row the search hid');
-  await click('.bases-count');
-  await click(await menuItem('Export CSV...'));
-  assert.deepEqual(await run(async () => ({ name: window.__csvName, text: await window.__csvBlob.text() })), {
-    name: 'Filtered.csv',
-    text: 'file name,status,points,label,boom\nAlpha,open,1,plain,1',
+  assert.deepEqual(await exportCsv(), {
+    name: 'Edge-Filtered.csv',
+    text: 'file name,status,points,label,boom\r\nAlpha,open,1,plain,1\r\n',
   });
   await clearSearch();
   await search('hi');
   await wait(async () => await count() === '1 results' && await cell('Edge/Quote.md', 'file.name') === 'Quote', 'search hi');
-  await click('.bases-count');
-  await click(await menuItem('Export CSV...'));
-  assert.equal(await run(async () => window.__csvBlob.text()), 'file name,status,points,label,boom\nQuote,open,4,"he said ""hi"",\r\nthen 🎉",0.25');
+  assert.deepEqual(await exportCsv(), { name: 'Edge-Filtered.csv', text: 'file name,status,points,label,boom\r\nQuote,open,4,"he said ""hi"",\r\nthen 🎉",0.25\r\n' });
   assert.equal(await source('Edge.base'), BASE, 'searching and exporting write nothing');
   check(true, 'summaries and CSV follow the search on a filtered view, including quotes, CR/LF and emoji');
 

@@ -8,9 +8,8 @@ import { baseModel, noteKey, propertyId, viewGlyph } from "./model";
 import { addView, writeFilters, writeTop, writeView, type Sort } from "./write";
 import { filterMenu } from "./filterMenu";
 import { drag, dropSlot, reordered } from "./drag";
-import { resultsMenu } from "./results";
+import { resultsMenu, type ShownTable } from "./results";
 import { newRow, rowSeed } from "./newRow";
-import type { Value } from "./expression";
 import { mapping, type Yaml } from "./yaml";
 import { menuInputEscape } from "./menuInput";
 import { configureView } from "./config";
@@ -25,7 +24,7 @@ const sortsOf = (base: Model): Sort[] => base.sorts.map(s => ({property:s.proper
 export interface BaseFile { read(): Promise<string>; write(text: string): Promise<void> }
 /** What the Group menu reads from the drawn view (groups.ts). */
 export interface GroupState { groups(): readonly RowGroup[]; hiddenRows(): number }
-export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>, rows: () => Value[][], search: (query: string) => void, inferred: (key: string) => PropertyType, grouping: GroupState) {
+export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>, table: () => ShownTable, search: (query: string) => void, inferred: (key: string) => PropertyType, grouping: GroupState, exportView: () => void) {
   let writing = Promise.resolve(), gone = false;
   const save = (change: (source: string, base: Model) => string, done?: () => void, select?: (base: Model) => number) => {
     const index = current().viewIndex;
@@ -175,7 +174,7 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
       return buttons;
     }
     const view=h("button",{type:"button",class:"bases-view-name","aria-label":"View",onclick:()=>views(view)},icon(viewGlyph(base.type)),h("span",null,base.name),icon("chevrons-up-down"));
-    const count=h("button",{type:"button",class:"bases-count","aria-label":"Results",onclick:()=>resultsMenu(count,baseLimit(),current().total,current().columns.map(current().label),rows(),value=>save((source,b)=>writeView(source,"limit",value,b.viewIndex)))},icon("text-align-start"),h("span",null,`${base.results} results`));
+    const count=h("button",{type:"button",class:"bases-count","aria-label":"Results",onclick:()=>resultsMenu(count,baseLimit(),current().total,table,exportView,value=>save((source,b)=>writeView(source,"limit",value,b.viewIndex)))},icon("text-align-start"),h("span",null,`${base.results} results`));
     const sort=button("Sort","arrow-up-narrow-wide",()=>sortMenu(sort));sort.classList.toggle("is-active",!!base.sorts.length);if(base.sorts.length)sort.append(h("span",{class:"bases-badge"},String(base.sorts.length)));
     const grouped=button("Group","group",()=>groupMenu(grouped,groupHost));grouped.classList.toggle("is-active",!!base.groupBy);grouped.append(h("span",{class:"bases-group-detail"},groupDetail(base)));
     const filter=button("Filter","list-filter",()=>filters(filter));filter.classList.toggle("is-active",base.filtered);

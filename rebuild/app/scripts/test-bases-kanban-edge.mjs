@@ -149,23 +149,29 @@ await withBrowser(async ({ run, click, point, send, press, chord, check }) => {
     await sleep(40);
     return [...seen.values()];
   };
-  const installCsv = () => run(() => {
-    const orig = URL.createObjectURL.bind(URL);
-    URL.createObjectURL = blob => { if (String(blob.type).startsWith('text/csv')) window.__csvBlob = blob; return orig(blob); };
-    document.addEventListener('click', e => {
-      const a = e.target instanceof Element && e.target.closest('a[download]');
-      if (!a) return;
-      e.preventDefault();
-      window.__csvName = a.download;
-    }, true);
+  // Export as CSV writes through the save dialog to a vault file; capture the bytes it writes.
+  const installCsv = () => run(async () => {
+    const { api } = await import('/src/api.ts');
+    const orig = api.replaceFileBytes;
+    window.__csvWrites = [];
+    api.replaceFileBytes = async (path, bytes) => { window.__csvWrites.push({ path, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) }); return orig(path, bytes); };
   });
   const csv = async () => {
-    await run(() => { window.__csvBlob = null; window.__csvName = null; });
+    const before = await run(() => window.__csvWrites.length);
     await closeMenu();
     await click('.bases-count');
-    await choose('Export CSV...');
-    await wait(() => run(() => !!window.__csvBlob), 'csv blob');
-    return run(async () => ({ name: window.__csvName, text: await window.__csvBlob.text() }));
+    await choose('Export as CSV...');
+    await wait(() => run(() => !!document.querySelector('.bases-export input')), 'save dialog');
+    await press('Enter');
+    // Saving the same view again asks before replacing; Enter says Replace.
+    await wait(async () => {
+      if (await run(() => document.querySelector('.modal-container:last-child .modal-title')?.textContent.startsWith('Replace'))) await press('Enter');
+      return run(n => window.__csvWrites.length > n, before);
+    }, 'csv written');
+    const written = await run(() => window.__csvWrites.at(-1));
+    // The "Saved" notice sits over the toolbar's right end; the next steps click there.
+    await run(() => document.querySelector('.notice-container')?.remove());
+    return { name: written.path, text: written.text };
   };
 
   await run(async (notes, source, other) => {
@@ -224,8 +230,9 @@ await withBrowser(async ({ run, click, point, send, press, chord, check }) => {
   check(true, 'Odd groups stay distinct; empty, hidden, filtered and ".md" stay out; waiting is an empty column');
 
   const exported = await csv();
-  const lines = exported.text.split('\n');
-  assert.equal(exported.name, 'Board.csv');
+  const lines = exported.text.split('\r\n');
+  assert.equal(exported.name, 'KE-Board.csv');
+  assert.equal(lines.pop(), '', 'every record ends with CRLF');
   assert.equal(lines.length, SHOWN.length + 1, exported.text);
   for (const path of SHOWN) {
     const name = path.slice('KE/'.length, -'.md'.length);
@@ -396,8 +403,8 @@ await withBrowser(async ({ run, click, point, send, press, chord, check }) => {
   assert.equal(searched.some(c => c.label === 'review'), false, searched.map(c => c.label).join(', '));
   assert.equal(searched.some(c => c.cards.includes('KE/Gamma.md') || c.cards.includes('KE/Secret.md')), false);
   const searchedCsv = await csv();
-  assert.equal(searchedCsv.name, 'Board.csv');
-  assert.equal(searchedCsv.text, 'file name,status\nNeedle,todo');
+  assert.equal(searchedCsv.name, 'KE-Board.csv');
+  assert.equal(searchedCsv.text, 'file name,status\r\nNeedle,todo\r\n');
   await view('List');
   await wait(() => run(() => document.querySelectorAll('.bases-list-item').length === 1 && document.querySelector('.bases-list-item')?.dataset.path === 'KE/Needle.md'), 'list follows the search');
   assert.equal(await run(() => document.querySelector('.bases-count span').textContent), '1 results');
@@ -405,8 +412,8 @@ await withBrowser(async ({ run, click, point, send, press, chord, check }) => {
   await wait(() => run(() => document.querySelector('tfoot [data-summary]')?.dataset.value === '1'), 'summary follows the search');
   assert.deepEqual(await run(() => [...document.querySelectorAll('.bases-b5-toggle')].map(el => el.getAttribute('aria-label'))), ['todo (1)']);
   const tableCsv = await csv();
-  assert.equal(tableCsv.name, 'Table.csv');
-  assert.equal(tableCsv.text, 'file name,status\nNeedle,todo');
+  assert.equal(tableCsv.name, 'KE-Table.csv');
+  assert.equal(tableCsv.text, 'file name,status\r\nNeedle,todo\r\n');
   await click('.bases-search-input');
   await press('Escape');
   await wait(() => run(() => document.querySelector('.bases-count span').textContent === '14 results'), 'search cleared on the table');
